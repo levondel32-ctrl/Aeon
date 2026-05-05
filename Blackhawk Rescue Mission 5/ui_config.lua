@@ -14,6 +14,8 @@ local NoRecoil = getgenv().BRM5_Features.NoRecoil
 local Fullbright = getgenv().BRM5_Features.Fullbright
 local Wall = getgenv().BRM5_Features.Wall
 local AllyScan = getgenv().BRM5_Features.AllyScan
+local TargetSizingPVP = getgenv().BRM5_Features.TargetSizingPVP
+local TargetSizingPVE = getgenv().BRM5_Features.TargetSizingPVE
 
 -- Wall system configuration
 local wallConfig = {
@@ -149,6 +151,57 @@ WeaponSection:AddToggle({
 	end
 })
 
+local TargetSizingSection = CombatTab:CreateSection({ Name = "Target Sizing", Side = "Right" })
+
+TargetSizingSection:AddToggle({
+	Name = "Enable PVP Sizing",
+	Flag = "BRM5_TargetSizingPVP",
+	Value = false,
+	Callback = function(v)
+		if v then
+			TargetSizingPVP.Enable()
+		else
+			TargetSizingPVP.Disable()
+		end
+	end
+})
+
+TargetSizingSection:AddToggle({
+	Name = "Enable PVE Sizing",
+	Flag = "BRM5_TargetSizingPVE",
+	Value = false,
+	Callback = function(v)
+		if v then
+			TargetSizingPVE.Enable()
+		else
+			TargetSizingPVE.Disable()
+		end
+	end
+})
+
+TargetSizingSection:AddToggle({
+	Name = "Show Target Box",
+	Flag = "BRM5_ShowTargetBox",
+	Value = false,
+	Callback = function(v)
+		TargetSizingPVP.UpdateSettings({ ShowTargetBox = v })
+		TargetSizingPVE.UpdateSettings({ ShowTargetBox = v })
+	end
+})
+
+TargetSizingSection:AddSlider({
+	Name = "Box Size",
+	Flag = "BRM5_TargetBoxSize",
+	Value = 10,
+	Min = 5,
+	Max = 30,
+	Callback = function(v)
+		local size = Vector3.new(v, v, v)
+		TargetSizingPVP.UpdateSettings({ TargetBoxSize = size })
+		TargetSizingPVE.UpdateSettings({ TargetBoxSize = size })
+	end
+})
+
 -- ========== VISUALS TAB ==========
 local ESPSection = VisualsTab:CreateSection({ Name = "ESP / Wallhack" })
 
@@ -257,7 +310,9 @@ end)
 
 -- Main update loop
 local colorAccumulator = 0
+local targetSizingAccumulator = 0
 local COLOR_UPDATE_INTERVAL = 0.2 -- Increased from 0.1 to reduce raycasting frequency
+local TARGET_SIZING_UPDATE_INTERVAL = 0.5 -- Update target sizing every 0.5 seconds
 RunService.RenderStepped:Connect(function(dt)
 	-- Update aimbot keybind state
 	Aimbot:setHoldingKey(aimbotKeyHeld)
@@ -270,6 +325,21 @@ RunService.RenderStepped:Connect(function(dt)
 	if colorAccumulator >= COLOR_UPDATE_INTERVAL then
 		colorAccumulator = 0
 		Wall:updateColors(Camera, services.Workspace, services.Players.LocalPlayer, wallConfig)
+	end
+	
+	-- Update Target Sizing (throttled)
+	targetSizingAccumulator = targetSizingAccumulator + dt
+	if targetSizingAccumulator >= TARGET_SIZING_UPDATE_INTERVAL then
+		targetSizingAccumulator = 0
+		TargetSizingPVP:updateAllTargets()
+		-- For PVE, we need to get NPC models from workspace
+		local npcModels = {}
+		for _, model in ipairs(services.Workspace:GetChildren()) do
+			if model:IsA("Model") and model:FindFirstChild("Humanoid") and not services.Players:GetPlayerFromCharacter(model) then
+				table.insert(npcModels, model)
+			end
+		end
+		TargetSizingPVE:updateAllTargets(npcModels)
 	end
 	
 	-- Only aim when aimbot is enabled AND key is held
@@ -291,4 +361,6 @@ local function cleanup()
 	Aimbot.Disable()
 	Freeze.Disable()
 	Fullbright.Disable()
+	TargetSizingPVP.Disable()
+	TargetSizingPVE.Disable()
 end
