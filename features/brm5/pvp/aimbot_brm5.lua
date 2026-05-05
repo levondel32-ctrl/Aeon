@@ -1,6 +1,6 @@
 --[[
     Aimbot Module for BRM5 PVP
-    Simple logic: find models with Humanoid, aim at head
+    Uses Wall system for target detection
 ]]
 
 local Aimbot = {
@@ -14,8 +14,7 @@ local Aimbot = {
     fovColor = Color3.fromRGB(255, 255, 255),
     smoothing = 95,
     deadzone = 1.5,
-    targetCache = {},  -- Кэш для целей
-    lastCacheUpdate = 0
+    wallSystem = nil  -- Reference to Wall module
 }
 
 local Players = game:GetService("Players")
@@ -85,6 +84,10 @@ function Aimbot:setHoldingKey(isHeld)
     self.holdingKey = isHeld and true or false
 end
 
+function Aimbot:setWallSystem(wallSystem)
+    self.wallSystem = wallSystem
+end
+
 function Aimbot:updateFOVCircle(camera)
     ensureFOVCircle()
     if not self.fovCircle or not camera then
@@ -104,51 +107,27 @@ function Aimbot:updateFOVCircle(camera)
     end
 end
 
-function Aimbot:updateTargetCache()
-    -- Обновляем кэш только раз в 0.5 секунды
-    local currentTime = tick()
-    if currentTime - self.lastCacheUpdate < 0.5 then
-        return
-    end
-    self.lastCacheUpdate = currentTime
-    
-    -- Очищаем старый кэш
-    table.clear(self.targetCache)
-    
-    -- Находим все модели с Humanoid
-    for _, desc in pairs(Workspace:GetDescendants()) do
-        if desc:IsA("Model") then
-            local humanoid = desc:FindFirstChildOfClass("Humanoid")
-            if humanoid and humanoid.Health > 0 and LocalPlayer.Character ~= desc then
-                local head = desc:FindFirstChild("Head")
-                if head and head:IsA("BasePart") then
-                    table.insert(self.targetCache, head)
-                end
-            end
-        end
-    end
-end
-
-function Aimbot:getClosestHead(camera)
-    if not camera then
+function Aimbot:getClosestHead(camera, visibleColor)
+    if not camera or not self.wallSystem then
         return nil
     end
-
-    -- Обновляем кэш целей
-    self:updateTargetCache()
 
     local closestTarget, minDistance = nil, math.huge
     local screenCenter = getScreenCenter(camera)
 
-    -- Ищем ближайшую цель из кэша
-    for _, head in ipairs(self.targetCache) do
+    -- Use Wall system's tracked heads - only aim at visible targets (green box)
+    for head in pairs(self.wallSystem.trackedHeads) do
         if head and head.Parent then
-            local targetPosition, onScreen = camera:WorldToViewportPoint(head.Position)
-            if onScreen then
-                local distanceToCenter = (Vector2.new(targetPosition.X, targetPosition.Y) - screenCenter).Magnitude
-                if (not self.fovEnabled or distanceToCenter <= self.fovRadius) and distanceToCenter < minDistance then
-                    closestTarget = head
-                    minDistance = distanceToCenter
+            local box = head:FindFirstChild("Wall_Box")
+            -- Only target heads with visible (green) box
+            if box and box:IsA("BoxHandleAdornment") and box.Color3 == visibleColor and box.Visible then
+                local targetPosition, onScreen = camera:WorldToViewportPoint(head.Position)
+                if onScreen then
+                    local distanceToCenter = (Vector2.new(targetPosition.X, targetPosition.Y) - screenCenter).Magnitude
+                    if (not self.fovEnabled or distanceToCenter <= self.fovRadius) and distanceToCenter < minDistance then
+                        closestTarget = head
+                        minDistance = distanceToCenter
+                    end
                 end
             end
         end
@@ -186,8 +165,7 @@ function Aimbot:cleanup()
     self.fovCircle = nil
     self.fovStroke = nil
     self.holdingKey = false
-    table.clear(self.targetCache)
-    self.lastCacheUpdate = 0
+    self.wallSystem = nil
 end
 
 -- Public API

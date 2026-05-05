@@ -12,6 +12,40 @@ local Aimbot = getgenv().BRM5_Features.Aimbot
 local Freeze = getgenv().BRM5_Features.Freeze
 local NoRecoil = getgenv().BRM5_Features.NoRecoil
 local Fullbright = getgenv().BRM5_Features.Fullbright
+local Wall = getgenv().BRM5_Features.Wall
+local AllyScan = getgenv().BRM5_Features.AllyScan
+
+-- Wall system configuration
+local wallConfig = {
+    TARGET_NAME = "Male",
+    TARGET_PART = "Head",
+    REQUIRED_CHILD = "Wall_Box",
+    BOX_TRANSPARENCY = 0.5,
+    visibleColor = Color3.fromRGB(0, 255, 0),
+    hiddenColor = Color3.fromRGB(255, 0, 0),
+    wallEnabled = false,
+    isUnloaded = false,
+    ALLY_SCAN_DURATION = 3,
+    ALLY_SCAN_CHECK_INTERVAL = 0.5
+}
+
+-- Services for Wall and AllyScan
+local services = {
+    Players = game:GetService("Players"),
+    RunService = game:GetService("RunService"),
+    Workspace = game:GetService("Workspace"),
+    camera = workspace.CurrentCamera
+}
+
+-- Initialize Wall system
+Wall:refreshTrackedTargets(services.Workspace, wallConfig)
+Wall:setupListener(services.Workspace, wallConfig)
+
+-- Set Wall system reference in Aimbot
+Aimbot:setWallSystem(Wall)
+
+-- Start AllyScan round monitor
+AllyScan:startRoundMonitor(services, Wall, wallConfig)
 
 -- Create UI Window
 local Window = library:CreateWindow({
@@ -188,15 +222,12 @@ local MiscSection = MiscTab:CreateSection({ Name = "Misc" })
 MiscSection:AddButton({
 	Name = "Destroy Script",
 	Callback = function()
-		ESP.Disable()
-		Aimbot.Disable()
-		Freeze.Disable()
-		Fullbright.Disable()
+		cleanup()
 		library.unload()
 	end
 })
 
--- Setup RenderStepped loop for Aimbot
+-- Setup RenderStepped loop for Aimbot and Wall system
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Camera = workspace.CurrentCamera
@@ -224,18 +255,39 @@ UserInputService.InputEnded:Connect(function(input)
 	end
 end)
 
-RunService.RenderStepped:Connect(function()
+-- Main update loop
+local colorAccumulator = 0
+RunService.RenderStepped:Connect(function(dt)
 	-- Update aimbot keybind state
 	Aimbot:setHoldingKey(aimbotKeyHeld)
 	
 	-- Always update FOV circle if Draw FOV is enabled
 	Aimbot:updateFOVCircle(Camera)
 	
+	-- Update Wall colors (throttled to reduce performance impact)
+	colorAccumulator = colorAccumulator + dt
+	if colorAccumulator >= 0.1 then
+		colorAccumulator = 0
+		Wall:updateColors(Camera, services.Workspace, services.Players.LocalPlayer, wallConfig)
+	end
+	
 	-- Only aim when aimbot is enabled AND key is held
 	if Aimbot.IsActive() then
-		local target = Aimbot:getClosestHead(Camera)
+		local target = Aimbot:getClosestHead(Camera, wallConfig.visibleColor)
 		if target then
 			Aimbot:aimAtTarget(target, Camera)
 		end
 	end
 end)
+
+-- Cleanup on script unload
+local function cleanup()
+	wallConfig.isUnloaded = true
+	Wall:cleanup()
+	AllyScan:stopRoundMonitor()
+	AllyScan:stop()
+	ESP.Disable()
+	Aimbot.Disable()
+	Freeze.Disable()
+	Fullbright.Disable()
+end
