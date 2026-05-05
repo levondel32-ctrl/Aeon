@@ -1,7 +1,6 @@
---[[
+--[[ 
     ESP Module for BRM5 PVP
-    Uses Highlight with visibility detection
-    Male = Player, NPC = models with "AI" or "Bot" in name
+    Optimized to reduce freezes
 ]]
 
 local ESP = {
@@ -10,6 +9,7 @@ local ESP = {
     descendantAddedConnection = nil,
     descendantRemovingConnection = nil,
     trackedModels = {},
+
     settings = {
         showNames = true,
         showDistance = true,
@@ -22,6 +22,7 @@ local ESP = {
         hiddenColor = Color3.fromRGB(255, 0, 0),
         npcColor = Color3.fromRGB(255, 165, 0)
     },
+
     npcNames = {
         ["Rifleman"] = true,
         ["Automatic Rifleman"] = true,
@@ -42,259 +43,326 @@ local ESP = {
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
+
 local LocalPlayer = Players.LocalPlayer
 
--- Raycast params cache
 local raycastParams = RaycastParams.new()
 raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
-raycastParams.FilterDescendantsInstances = {}
+raycastParams.IgnoreWater = true
 
-local function isVisible(targetModel, camera)
-    if not targetModel or not camera then
-        return false
-    end
+local raycastFilter = {}
 
-    local head = targetModel:FindFirstChild("Head")
-    if not head then
-        return false
-    end
+local pendingModels = {}
+local colorAccumulator = 0
+local INITIAL_SCAN_BATCH = 120
+local UPDATE_INTERVAL = 0.12
 
-    -- Update filter to exclude local player
-    if LocalPlayer and LocalPlayer.Character then
-        raycastParams.FilterDescendantsInstances = {LocalPlayer.Character}
-    end
-
-    local cameraPosition = camera.CFrame.Position
-    local result = Workspace:Raycast(cameraPosition, head.Position - cameraPosition, raycastParams)
-    
-    return not result or result.Instance:IsDescendantOf(targetModel)
+local function refreshRaycastFilter()
+	table.clear(raycastFilter)
+	if LocalPlayer and LocalPlayer.Character then
+		raycastFilter[1] = LocalPlayer.Character
+	end
+	raycastParams.FilterDescendantsInstances = raycastFilter
 end
 
 local function isNPC(model)
-    -- NPC определяется по имени модели из списка (используем хеш-таблицу для O(1) lookup)
-    return model and ESP.npcNames[model.Name] or false
+	return model and ESP.npcNames[model.Name] or false
 end
 
 local function shouldTrackModel(model)
-    if not model or not model:IsA("Model") then
-        return false
-    end
-    
-    -- Must have Humanoid
-    if not model:FindFirstChild("Humanoid") then
-        return false
-    end
-    
-    -- Skip local player
-    if model == LocalPlayer.Character then
-        return false
-    end
-    
-    -- Skip dead models (with BallSocketConstraint = ragdoll)
-    if model:FindFirstChildWhichIsA("BallSocketConstraint", true) then
-        return false
-    end
-    
-    local isMale = model.Name == "Male"
-    local isNPCModel = isNPC(model)
-    
-    -- Must be Male or NPC
-    if not (isMale or isNPCModel) then
-        return false
-    end
-    
-    -- Skip NPCs if disabled
-    if isNPCModel and not ESP.settings.showNPCs then
-        return false
-    end
-    
-    return true, isNPCModel
+	if not model or not model:IsA("Model") then
+		return false
+	end
+
+	if model == LocalPlayer.Character then
+		return false
+	end
+
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		return false
+	end
+
+	if humanoid.Health <= 0 then
+		return false
+	end
+
+	local isMale = model.Name == "Male"
+	local isNPCModel = isNPC(model)
+
+	if not (isMale or isNPCModel) then
+		return false
+	end
+
+	if isNPCModel and not ESP.settings.showNPCs then
+		return false
+	end
+
+	return true, isNPCModel
 end
 
 local function addHighlight(model, isNPCModel)
-    if ESP.trackedModels[model] then
-        return
-    end
-    
-    local highlight = model:FindFirstChild("Highlight")
-    if not highlight then
-        highlight = Instance.new("Highlight")
-        highlight.Parent = model
-        highlight.Adornee = model
-        highlight.OutlineTransparency = 0.5
-        highlight.FillTransparency = 0.8
-    end
-    
-    ESP.trackedModels[model] = {
-        isNPC = isNPCModel,
-        highlight = highlight
-    }
+	if ESP.trackedModels[model] then
+		return
+	end
+
+	local highlight = Instance.new("Highlight")
+	highlight.Name = "ESP_Highlight"
+	highlight.Adornee = model
+	highlight.Parent = model
+	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	highlight.OutlineTransparency = 0.35
+	highlight.FillTransparency = 0.85
+	highlight.Enabled = false
+
+	ESP.trackedModels[model] = {
+		isNPC = isNPCModel,
+		highlight = highlight,
+		head = model:FindFirstChild("Head")
+	}
 end
 
 local function removeHighlight(model)
-    local data = ESP.trackedModels[model]
-    if not data then
-        return
-    end
-    
-    if data.highlight and data.highlight.Parent then
-        data.highlight:Destroy()
-    end
-    
-    ESP.trackedModels[model] = nil
+	local data = ESP.trackedModels[model]
+	if not data then
+		return
+	end
+
+	if data.highlight then
+		data.highlight:Destroy()
+	end
+
+	ESP.trackedModels[model] = nil
+end
+
+local function isVisible(targetModel, head, camera)
+	if not targetModel or not camera or not head then
+		return false
+	end
+
+	refreshRaycastFilter()
+
+	local origin = camera.CFrame.Position
+	local direction = head.Position - origin
+	local result = Workspace:Raycast(origin, direction, raycastParams)
+
+	return not result or result.Instance:IsDescendantOf(targetModel)
+end
+
+local function queueModel(model)
+	if not ESP.enabled then
+		return
+	end
+
+	if not model or not model:IsA("Model") then
+		return
+	end
+
+	if pendingModels[model] or ESP.trackedModels[model] then
+		return
+	end
+
+	pendingModels[model] = true
+
+	task.defer(function()
+		pendingModels[model] = nil
+
+		if not ESP.enabled or not model or not model.Parent then
+			return
+		end
+
+		local shouldTrack, isNPCModel = shouldTrackModel(model)
+		if shouldTrack then
+			addHighlight(model, isNPCModel)
+		end
+	end)
 end
 
 local function onDescendantAdded(descendant)
-    if not ESP.enabled then
-        return
-    end
-    
-    -- Only process Models
-    if not descendant:IsA("Model") then
-        return
-    end
-    
-    -- Wait a frame for Humanoid to be added
-    task.wait()
-    
-    local shouldTrack, isNPCModel = shouldTrackModel(descendant)
-    if shouldTrack then
-        addHighlight(descendant, isNPCModel)
-    end
+	if not ESP.enabled then
+		return
+	end
+
+	if descendant:IsA("Model") then
+		queueModel(descendant)
+		return
+	end
+
+	local model = descendant:FindFirstAncestorOfClass("Model")
+	if model then
+		queueModel(model)
+	end
 end
 
 local function onDescendantRemoving(descendant)
-    if not ESP.enabled then
-        return
-    end
-    
-    -- If a tracked model is being removed, clean it up
-    if ESP.trackedModels[descendant] then
-        removeHighlight(descendant)
-    end
+	if not ESP.enabled then
+		return
+	end
+
+	if descendant:IsA("Model") and ESP.trackedModels[descendant] then
+		removeHighlight(descendant)
+	end
 end
 
 local function initializeExistingModels()
-    -- Only called ONCE when ESP is enabled
-    for _, descendant in pairs(Workspace:GetDescendants()) do
-        if descendant:IsA("Model") then
-            local shouldTrack, isNPCModel = shouldTrackModel(descendant)
-            if shouldTrack then
-                addHighlight(descendant, isNPCModel)
-            end
-        end
-    end
+	local descendants = Workspace:GetDescendants()
+
+	for i = 1, #descendants do
+		local descendant = descendants[i]
+
+		if descendant:IsA("Model") then
+			local shouldTrack, isNPCModel = shouldTrackModel(descendant)
+			if shouldTrack then
+				addHighlight(descendant, isNPCModel)
+			end
+		end
+
+		if i % INITIAL_SCAN_BATCH == 0 then
+			task.wait()
+		end
+	end
 end
 
 local function updateColors()
-    if not ESP.enabled then
-        return
-    end
+	if not ESP.enabled then
+		return
+	end
 
-    local camera = Workspace.CurrentCamera
-    if not camera then
-        return
-    end
+	local camera = Workspace.CurrentCamera
+	if not camera then
+		return
+	end
 
-    -- Fast color update for tracked models only
-    for model, data in pairs(ESP.trackedModels) do
-        -- Quick validity check (no heavy operations)
-        if not model or not model.Parent then
-            removeHighlight(model)
-        elseif data.highlight and data.highlight.Parent then
-            local color
-            if data.isNPC then
-                -- NPC uses NPC color
-                color = ESP.settings.npcColor
-            else
-                -- Male players use visible/hidden colors
-                local visible = isVisible(model, camera)
-                color = visible and ESP.settings.visibleColor or ESP.settings.hiddenColor
-            end
-            
-            data.highlight.Enabled = ESP.settings.showBox
-            data.highlight.OutlineColor = color
-            data.highlight.FillColor = color
-        end
-    end
+	local cameraPos = camera.CFrame.Position
+	local maxDistance = ESP.settings.maxDistance
+	local showBox = ESP.settings.showBox
+
+	for model, data in pairs(ESP.trackedModels) do
+		if not model or not model.Parent then
+			removeHighlight(model)
+		else
+			local highlight = data.highlight
+			if highlight and highlight.Parent then
+				local head = data.head
+				if not head or not head.Parent then
+					head = model:FindFirstChild("Head")
+					data.head = head
+				end
+
+				if not head then
+					highlight.Enabled = false
+				else
+					local distance = (cameraPos - head.Position).Magnitude
+					if distance > maxDistance then
+						highlight.Enabled = false
+					else
+						local color
+						if data.isNPC then
+							color = ESP.settings.npcColor
+						else
+							local visible = isVisible(model, head, camera)
+							color = visible and ESP.settings.visibleColor or ESP.settings.hiddenColor
+						end
+
+						highlight.Enabled = showBox
+						highlight.OutlineColor = color
+						highlight.FillColor = color
+					end
+				end
+			end
+		end
+	end
 end
 
--- Public API
 function ESP.Enable()
-    ESP.enabled = true
+	if ESP.enabled then
+		return
+	end
 
-    -- Initialize existing models ONCE
-    initializeExistingModels()
-    
-    -- Listen for new descendants (event-driven, no GetDescendants spam)
-    ESP.descendantAddedConnection = Workspace.DescendantAdded:Connect(onDescendantAdded)
-    
-    -- Listen for removed descendants to clean up automatically
-    ESP.descendantRemovingConnection = Workspace.DescendantRemoving:Connect(onDescendantRemoving)
-    
-    -- Start fast color update loop using RenderStepped for smooth updates
-    ESP.colorConnection = RunService.RenderStepped:Connect(function()
-        if not ESP.enabled then
-            return
-        end
-        updateColors()
-    end)
+	ESP.enabled = true
+	colorAccumulator = 0
+
+	task.spawn(initializeExistingModels)
+
+	ESP.descendantAddedConnection = Workspace.DescendantAdded:Connect(onDescendantAdded)
+	ESP.descendantRemovingConnection = Workspace.DescendantRemoving:Connect(onDescendantRemoving)
+
+	ESP.colorConnection = RunService.Heartbeat:Connect(function(dt)
+		if not ESP.enabled then
+			return
+		end
+
+		colorAccumulator += dt
+		if colorAccumulator < UPDATE_INTERVAL then
+			return
+		end
+
+		colorAccumulator = 0
+		updateColors()
+	end)
 end
 
 function ESP.Disable()
-    ESP.enabled = false
+	ESP.enabled = false
+	colorAccumulator = 0
+	table.clear(pendingModels)
 
-    -- Stop event listeners
-    if ESP.descendantAddedConnection then
-        ESP.descendantAddedConnection:Disconnect()
-        ESP.descendantAddedConnection = nil
-    end
-    
-    if ESP.descendantRemovingConnection then
-        ESP.descendantRemovingConnection:Disconnect()
-        ESP.descendantRemovingConnection = nil
-    end
-    
-    -- Stop color update loop
-    if ESP.colorConnection then
-        ESP.colorConnection:Disconnect()
-        ESP.colorConnection = nil
-    end
+	if ESP.descendantAddedConnection then
+		ESP.descendantAddedConnection:Disconnect()
+		ESP.descendantAddedConnection = nil
+	end
 
-    -- Remove all highlights from tracked models
-    for model in pairs(ESP.trackedModels) do
-        removeHighlight(model)
-    end
+	if ESP.descendantRemovingConnection then
+		ESP.descendantRemovingConnection:Disconnect()
+		ESP.descendantRemovingConnection = nil
+	end
+
+	if ESP.colorConnection then
+		ESP.colorConnection:Disconnect()
+		ESP.colorConnection = nil
+	end
+
+	for model in pairs(ESP.trackedModels) do
+		removeHighlight(model)
+	end
 end
 
 function ESP.UpdateSettings(newSettings)
-    if newSettings.TeamCheck ~= nil then
-        ESP.settings.teamCheck = newSettings.TeamCheck
-    end
-    if newSettings.ShowDistance ~= nil then
-        ESP.settings.showDistance = newSettings.ShowDistance
-    end
-    if newSettings.ShowHealth ~= nil then
-        ESP.settings.showHealth = newSettings.ShowHealth
-    end
-    if newSettings.ShowBox ~= nil then
-        ESP.settings.showBox = newSettings.ShowBox
-    end
-    if newSettings.ShowNPCs ~= nil then
-        ESP.settings.showNPCs = newSettings.ShowNPCs
-        
-        -- Re-evaluate all tracked models when NPC visibility changes
-        if ESP.enabled then
-            for model, data in pairs(ESP.trackedModels) do
-                if data.isNPC and not ESP.settings.showNPCs then
-                    removeHighlight(model)
-                end
-            end
-        end
-    end
-    if newSettings.MaxDistance then
-        ESP.settings.maxDistance = newSettings.MaxDistance
-    end
+	if newSettings.TeamCheck ~= nil then
+		ESP.settings.teamCheck = newSettings.TeamCheck
+	end
+
+	if newSettings.ShowDistance ~= nil then
+		ESP.settings.showDistance = newSettings.ShowDistance
+	end
+
+	if newSettings.ShowHealth ~= nil then
+		ESP.settings.showHealth = newSettings.ShowHealth
+	end
+
+	if newSettings.ShowBox ~= nil then
+		ESP.settings.showBox = newSettings.ShowBox
+	end
+
+	if newSettings.ShowNPCs ~= nil then
+		ESP.settings.showNPCs = newSettings.ShowNPCs
+
+		if ESP.enabled then
+			for model, data in pairs(ESP.trackedModels) do
+				if data.isNPC and not ESP.settings.showNPCs then
+					removeHighlight(model)
+				end
+			end
+
+			if ESP.settings.showNPCs then
+				task.spawn(initializeExistingModels)
+			end
+		end
+	end
+
+	if newSettings.MaxDistance ~= nil then
+		ESP.settings.maxDistance = newSettings.MaxDistance
+	end
 end
 
 return ESP
