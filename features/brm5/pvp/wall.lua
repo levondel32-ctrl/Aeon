@@ -123,7 +123,7 @@ function Walls:updateColors(camera, workspace, localPlayer, config)
     -- Reuse raycast params to avoid creating new objects every frame
     if not self.raycastParams then
         self.raycastParams = RaycastParams.new()
-        self.raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+        self.raycastParams.FilterType = Enum.RaycastFilterType.Exclude
     end
     
     -- Update filter only when character changes

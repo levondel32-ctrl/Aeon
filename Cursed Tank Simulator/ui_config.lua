@@ -6,11 +6,14 @@
 local library = loadstring(game:HttpGet('https://raw.githubusercontent.com/levondel32-ctrl/Aeon/main/UILibrary/UILibrary.lua'))()
 local Wait = library.subs.Wait
 
+local genv = (type(getgenv) == "function" and getgenv()) or _G
+local CTS = genv.CTS_Features
+
 -- Get features from global environment
-local ESP_CTS = getgenv().CTS_Features.ESP
-local CAMERA_CTS = getgenv().CTS_Features.Camera
-local WORLD_CTS = getgenv().CTS_Features.World
-local FREEZE_CTS = getgenv().CTS_Features.Freeze
+local ESP_CTS = CTS.ESP
+local CAMERA_CTS = CTS.Camera
+local WORLD_CTS = CTS.World
+local FREEZE_CTS = CTS.Freeze
 
 -- Create UI Window
 local Window = library:CreateWindow({

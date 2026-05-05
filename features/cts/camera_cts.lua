@@ -7,7 +7,6 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
-local Camera = workspace.CurrentCamera
 
 local Vehicles = workspace:WaitForChild("Vehicles")
 
@@ -99,6 +98,9 @@ local function getBestTankPart(tank)
 end
 
 function CAMERA_CTS.Enable()
+    if CAMERA_CTS.cameraEnabled then
+        return
+    end
     CAMERA_CTS.cameraEnabled = true
     CAMERA_CTS.zoom = 80
     
@@ -120,7 +122,7 @@ function CAMERA_CTS.Enable()
         function()
             if not CAMERA_CTS.cameraEnabled then return end
             
-            Camera = workspace.CurrentCamera
+            local Camera = workspace.CurrentCamera
             if not Camera then return end
             
             local tank = getLocalTank()
@@ -170,7 +172,7 @@ function CAMERA_CTS.Disable()
     LocalPlayer.CameraMaxZoomDistance = 128
     LocalPlayer.CameraMinZoomDistance = 0.5
     
-    Camera = workspace.CurrentCamera
+    local Camera = workspace.CurrentCamera
     if Camera then
         Camera.CameraType = Enum.CameraType.Custom
         

@@ -50,7 +50,7 @@ end
 function Fullbright.Enable()
     Fullbright.enabled = true
     local Lighting = game:GetService("Lighting")
-    if not Fullbright.originalLighting.Brightness then
+    if next(Fullbright.originalLighting) == nil then
         Fullbright:storeOriginalSettings(Lighting)
     end
     Fullbright:applyFullBright(Lighting)

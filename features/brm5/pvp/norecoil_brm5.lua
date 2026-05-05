@@ -6,6 +6,7 @@
 local NoRecoil = {}
 
 function NoRecoil.patchWeapons(replicatedStorage, patchOptions)
+    patchOptions = patchOptions or {}
     local weaponsFolder = replicatedStorage:FindFirstChild("Shared")
         and replicatedStorage.Shared:FindFirstChild("Configs")
         and replicatedStorage.Shared.Configs:FindFirstChild("Weapon")

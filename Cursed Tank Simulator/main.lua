@@ -14,7 +14,8 @@ ESP_CTS.Initialize()
 WORLD_CTS.Initialize()
 
 -- Export to global environment for UI access
-getgenv().CTS_Features = {
+local genv = (type(getgenv) == "function" and getgenv()) or _G
+genv.CTS_Features = {
     ESP = ESP_CTS,
     Camera = CAMERA_CTS,
     World = WORLD_CTS,

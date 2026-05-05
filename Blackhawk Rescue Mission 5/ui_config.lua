@@ -6,14 +6,17 @@ Defines the user interface for Blackhawk Rescue Mission 5
 local library = loadstring(game:HttpGet('https://raw.githubusercontent.com/levondel32-ctrl/Aeon/main/UILibrary/UILibrary.lua'))()
 local Wait = library.subs.Wait
 
+local genv = (type(getgenv) == "function" and getgenv()) or _G
+local BRM = genv.BRM5_Features
+
 -- Get features from global environment
-local ESP = getgenv().BRM5_Features.ESP
-local Aimbot = getgenv().BRM5_Features.Aimbot
-local Freeze = getgenv().BRM5_Features.Freeze
-local NoRecoil = getgenv().BRM5_Features.NoRecoil
-local Fullbright = getgenv().BRM5_Features.Fullbright
-local Wall = getgenv().BRM5_Features.Wall
-local AllyScan = getgenv().BRM5_Features.AllyScan
+local ESP = BRM.ESP
+local Aimbot = BRM.Aimbot
+local Freeze = BRM.Freeze
+local NoRecoil = BRM.NoRecoil
+local Fullbright = BRM.Fullbright
+local Wall = BRM.Wall
+local AllyScan = BRM.AllyScan
 
 -- Wall system configuration
 local wallConfig = {
@@ -43,9 +46,21 @@ Wall:setupListener(services.Workspace, wallConfig)
 
 -- Set Wall system reference in Aimbot
 Aimbot:setWallSystem(Wall)
+Aimbot.UpdateSettings({ VisibleColor = wallConfig.visibleColor })
 
 -- Start AllyScan round monitor
 AllyScan:startRoundMonitor(services, Wall, wallConfig)
+
+local function cleanup()
+	wallConfig.isUnloaded = true
+	Wall:cleanup()
+	AllyScan:stopRoundMonitor()
+	AllyScan:stop()
+	ESP.Disable()
+	Aimbot.Disable()
+	Freeze.Disable()
+	Fullbright.Disable()
+end
 
 -- Create UI Window
 local Window = library:CreateWindow({
@@ -180,6 +195,8 @@ ESPSection:AddColorpicker({
 	Value = Color3.fromRGB(0, 255, 0),
 	Callback = function(v)
 		ESP.settings.visibleColor = v
+		wallConfig.visibleColor = v
+		Aimbot.UpdateSettings({ VisibleColor = v })
 	end
 })
 
@@ -189,6 +206,7 @@ ESPSection:AddColorpicker({
 	Value = Color3.fromRGB(255, 0, 0),
 	Callback = function(v)
 		ESP.settings.hiddenColor = v
+		wallConfig.hiddenColor = v
 	end
 })
 
@@ -280,15 +298,3 @@ RunService.RenderStepped:Connect(function(dt)
 		end
 	end
 end)
-
--- Cleanup on script unload
-local function cleanup()
-	wallConfig.isUnloaded = true
-	Wall:cleanup()
-	AllyScan:stopRoundMonitor()
-	AllyScan:stop()
-	ESP.Disable()
-	Aimbot.Disable()
-	Freeze.Disable()
-	Fullbright.Disable()
-end

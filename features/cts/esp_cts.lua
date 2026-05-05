@@ -6,7 +6,6 @@
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
-local Camera = workspace.CurrentCamera
 local UserInputService = game:GetService("UserInputService")
 
 local Vehicles = workspace:WaitForChild("Vehicles")
@@ -148,10 +147,24 @@ function ESP_CTS.Initialize()
     local frameCounter = 0
     local ESP_UPDATE_RATE = 3
     
-    RunService.RenderStepped:Connect(function()
+    if ESP_CTS._renderConnection then
+        ESP_CTS._renderConnection:Disconnect()
+        ESP_CTS._renderConnection = nil
+    end
+    if ESP_CTS._vehiclesChildAdded then
+        ESP_CTS._vehiclesChildAdded:Disconnect()
+        ESP_CTS._vehiclesChildAdded = nil
+    end
+
+    ESP_CTS._renderConnection = RunService.RenderStepped:Connect(function()
         frameCounter += 1
         
         if frameCounter % ESP_UPDATE_RATE ~= 0 then
+            return
+        end
+        
+        local Camera = workspace.CurrentCamera
+        if not Camera then
             return
         end
         
@@ -279,10 +292,18 @@ function ESP_CTS.Initialize()
     for _, tank in ipairs(Vehicles:GetChildren()) do
         ESP_CTS.UpdateESP(tank)
     end
-    Vehicles.ChildAdded:Connect(ESP_CTS.UpdateESP)
+    ESP_CTS._vehiclesChildAdded = Vehicles.ChildAdded:Connect(ESP_CTS.UpdateESP)
 end
 
 function ESP_CTS.Cleanup()
+    if ESP_CTS._renderConnection then
+        ESP_CTS._renderConnection:Disconnect()
+        ESP_CTS._renderConnection = nil
+    end
+    if ESP_CTS._vehiclesChildAdded then
+        ESP_CTS._vehiclesChildAdded:Disconnect()
+        ESP_CTS._vehiclesChildAdded = nil
+    end
     for _, data in pairs(Highlights) do
         if data.Tracer then
             data.Tracer:Remove()

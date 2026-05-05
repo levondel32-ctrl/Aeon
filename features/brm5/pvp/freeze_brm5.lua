@@ -11,7 +11,7 @@ local LocalPlayer = Players.LocalPlayer
 
 local Freeze = {
 	enabled = false,
-	frozenModels = {}, -- [Model] = { cframe = CFrame, bodyVelocity = Instance, bodyGyro = Instance }
+	frozenModels = {}, -- [Model] = { cframe = CFrame, bodyVelocity = Instance, bodyGyro = Instance, humanoid = Humanoid, oldWalkSpeed = number, animator = Animator }
 	connection = nil,
 }
 
@@ -30,6 +30,37 @@ local function freezeMale(maleModel)
 
 	if Freeze.frozenModels[maleModel] then
 		return true
+	end
+
+	local humanoid = maleModel:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		return false
+	end
+
+	-- Stop all animations
+	local animator = humanoid:FindFirstChildOfClass("Animator")
+	if animator then
+		for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+			track:Stop(0)
+		end
+	end
+
+	-- Disable Humanoid movement controller
+	local oldWalkSpeed = humanoid.WalkSpeed
+	humanoid.WalkSpeed = 0
+	humanoid.JumpPower = 0
+	humanoid.AutoRotate = false
+	
+	-- Set Humanoid state to Physics to disable internal controller
+	pcall(function()
+		humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+	end)
+
+	-- Anchor all body parts to completely freeze physics
+	for _, part in ipairs(maleModel:GetDescendants()) do
+		if part:IsA("BasePart") and part ~= hrp then
+			part.Anchored = true
+		end
 	end
 
 	-- Create BodyVelocity to lock position
@@ -52,6 +83,9 @@ local function freezeMale(maleModel)
 		cframe = hrp.CFrame,
 		bodyVelocity = bodyVelocity,
 		bodyGyro = bodyGyro,
+		humanoid = humanoid,
+		oldWalkSpeed = oldWalkSpeed,
+		animator = animator,
 	}
 
 	return true
@@ -61,6 +95,25 @@ local function unfreezeMale(maleModel)
 	local state = Freeze.frozenModels[maleModel]
 	if not state then
 		return
+	end
+
+	-- Restore Humanoid settings
+	if state.humanoid and state.humanoid.Parent then
+		state.humanoid.WalkSpeed = state.oldWalkSpeed
+		state.humanoid.JumpPower = 50
+		state.humanoid.AutoRotate = true
+		
+		-- Restore normal state
+		pcall(function()
+			state.humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+		end)
+	end
+
+	-- Unanchor all body parts
+	for _, part in ipairs(maleModel:GetDescendants()) do
+		if part:IsA("BasePart") then
+			part.Anchored = false
+		end
 	end
 
 	-- Remove BodyVelocity and BodyGyro
@@ -99,6 +152,17 @@ local function freezeLoop()
 					end
 					if state.bodyGyro and state.bodyGyro.Parent then
 						state.bodyGyro.CFrame = state.cframe
+					end
+					
+					-- Keep Humanoid disabled
+					if state.humanoid and state.humanoid.Parent then
+						state.humanoid.WalkSpeed = 0
+						state.humanoid.JumpPower = 0
+						pcall(function()
+							if state.humanoid:GetState() ~= Enum.HumanoidStateType.Physics then
+								state.humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+							end
+						end)
 					end
 				else
 					freezeMale(desc)

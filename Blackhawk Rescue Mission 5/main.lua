@@ -13,7 +13,8 @@ local Wall = loadstring(game:HttpGet("https://raw.githubusercontent.com/levondel
 local AllyScan = loadstring(game:HttpGet("https://raw.githubusercontent.com/levondel32-ctrl/Aeon/main/features/brm5/pvp/ally_scan.lua"))()
 
 -- Export to global environment for UI access
-getgenv().BRM5_Features = {
+local genv = (type(getgenv) == "function" and getgenv()) or _G
+genv.BRM5_Features = {
     ESP = ESP,
     Aimbot = Aimbot,
     Freeze = Freeze,

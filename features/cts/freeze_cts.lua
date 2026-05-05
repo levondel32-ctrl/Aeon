@@ -7,7 +7,6 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
-local Camera = workspace.CurrentCamera
 
 local Vehicles = workspace:WaitForChild("Vehicles")
 
@@ -42,11 +41,15 @@ end
 
 -- Get tank under mouse cursor
 local function GetTankUnderMouse()
+    local Camera = workspace.CurrentCamera
+    if not Camera then
+        return nil
+    end
     local mouse = UserInputService:GetMouseLocation()
     local ray = Camera:ViewportPointToRay(mouse.X, mouse.Y)
     
     local raycastParams = RaycastParams.new()
-    raycastParams.FilterType = Enum.RaycastFilterType.Whitelist
+    raycastParams.FilterType = Enum.RaycastFilterType.Include
     raycastParams.FilterDescendantsInstances = {Vehicles}
     
     local result = workspace:Raycast(ray.Origin, ray.Direction * 5000, raycastParams)
@@ -150,6 +153,9 @@ end
 
 -- Public functions
 function FREEZE_CTS.Enable()
+    if FREEZE_CTS.FreezeConnection then
+        return
+    end
     FREEZE_CTS.Enabled = true
     
     -- Start freeze loop

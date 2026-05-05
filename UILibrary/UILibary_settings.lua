@@ -76,8 +76,8 @@ Name = "Extend Combo Timout",
 Flag = "BoardControlSection_ExtendComboTimeout"
 })
 BoardControlSection:AddSlider({
-Name = "Timeout Extension",
-Flag = "BoardControlSection_CoinDistance",
+	Name = "Timeout Extension",
+	Flag = "BoardControlSection_TimeoutExtension",
 Value = 3,
 Min = 0,
 Max = 20,
@@ -142,8 +142,8 @@ Name = "Extend Ragdoll Duration",
 Flag = "FunSection_ExtendRagdollDuration"
 })
 FunSection:AddSlider({
-Name = "Coin Distance",
-Flag = "FarmingSection_Coin Distance",
+	Name = "Ragdoll Extension",
+	Flag = "FunSection_RagdollExtension",
 Value = 4,
 Min = 0,
 Max = 60,

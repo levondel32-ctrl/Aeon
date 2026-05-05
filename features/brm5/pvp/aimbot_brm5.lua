@@ -110,11 +110,12 @@ function Aimbot:updateFOVCircle(camera)
     end
 end
 
-function Aimbot:getClosestHead(camera)
+function Aimbot:getClosestHead(camera, visibleColor)
     if not self.wallSystem or not camera then
         return nil
     end
 
+    local visible = visibleColor or self.config.visibleColor
     local closestTarget, minDistance = nil, math.huge
     local screenCenter = getScreenCenter(camera)
     local fovRadiusSq = self.config.fovRadius * self.config.fovRadius -- Use squared distance to avoid sqrt
@@ -122,7 +123,7 @@ function Aimbot:getClosestHead(camera)
     -- Use Wall system's tracked heads - only aim at visible targets
     for head in pairs(self.wallSystem.trackedHeads) do
         local box = head and head:FindFirstChild(self.config.REQUIRED_CHILD)
-        if head and head.Parent and box and box:IsA("BoxHandleAdornment") and box.Color3 == self.config.visibleColor and box.Visible then
+        if head and head.Parent and box and box:IsA("BoxHandleAdornment") and box.Color3 == visible and box.Visible then
             local targetPosition, onScreen = camera:WorldToViewportPoint(head.Position)
             if onScreen then
                 local deltaX = targetPosition.X - screenCenter.X
@@ -199,6 +200,9 @@ function Aimbot.UpdateSettings(settings)
     end
     if settings.FOVColor ~= nil then
         Aimbot.config.fovColor = settings.FOVColor
+    end
+    if settings.VisibleColor ~= nil then
+        Aimbot.config.visibleColor = settings.VisibleColor
     end
 end
 

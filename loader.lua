@@ -1,12 +1,14 @@
 -- Aeon Universal Loader
 -- Automatically detects game and loads appropriate script
 
+local genv = (type(getgenv) == "function" and getgenv()) or _G
+
 -- Check for duplicate loading
-if getgenv().Aeon_Loaded then
+if genv.Aeon_Loaded then
     return
 end
 
-getgenv().Aeon_Loading = true
+genv.Aeon_Loading = true
 
 -- Game IDs (can include multiple PlaceIds for games with sub-places)
 local GAME_IDS = {
@@ -65,5 +67,5 @@ else
     loadstring(game:HttpGet("https://raw.githubusercontent.com/levondel32-ctrl/Aeon/main/Cursed%20Tank%20Simulator/main.lua"))()
 end
 
-getgenv().Aeon_Loaded = true
-getgenv().Aeon_Loading = false
+genv.Aeon_Loaded = true
+genv.Aeon_Loading = false
