@@ -228,13 +228,14 @@ RunService.RenderStepped:Connect(function()
 	-- Update aimbot keybind state
 	Aimbot:setHoldingKey(aimbotKeyHeld)
 	
-	if Aimbot.enabled then
-		Aimbot:updateFOVCircle(Camera)
-		if Aimbot.IsActive() then
-			local target = Aimbot:getClosestHead(Camera)
-			if target then
-				Aimbot:aimAtTarget(target, Camera)
-			end
+	-- Always update FOV circle if Draw FOV is enabled
+	Aimbot:updateFOVCircle(Camera)
+	
+	-- Only aim when aimbot is enabled AND key is held
+	if Aimbot.IsActive() then
+		local target = Aimbot:getClosestHead(Camera)
+		if target then
+			Aimbot:aimAtTarget(target, Camera)
 		end
 	end
 end)

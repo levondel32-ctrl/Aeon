@@ -1,6 +1,6 @@
 --[[
     Aimbot Module for BRM5 PVP
-    Simple logic: find Male model, aim at head
+    Simple logic: find models with Humanoid, aim at head
 ]]
 
 local Aimbot = {
