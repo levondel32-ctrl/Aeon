@@ -7,112 +7,112 @@ local RapidFire = {
     enabled = false,
     rpm = 1000,
     hooked = false,
-    originalDischarge = nil,
-    patchedConfigs = {},
-    hookInProgress = false,
+    originalConfigs = {},
 }
 
-local function getModuleInstancesByName(moduleName)
-    local matches = {}
-    if type(getmodules) ~= "function" then
-        return matches
-    end
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-    local ok, modules = pcall(getmodules)
-    if not ok or type(modules) ~= "table" then
-        return matches
-    end
-
-    for _, instance in ipairs(modules) do
-        if typeof(instance) == "Instance" and instance:IsA("ModuleScript") and instance.Name == moduleName then
-            table.insert(matches, instance)
-        end
-    end
-
-    return matches
-end
-
--- Find and require a module by exact ModuleScript name.
-local function requireModuleByName(moduleName)
-    local modules = getModuleInstancesByName(moduleName)
-    for _, moduleScript in ipairs(modules) do
-        local ok, result = pcall(require, moduleScript)
-        if ok and type(result) == "table" then
-            return result
-        end
-    end
-    return nil
-end
-
--- Hook the FirearmInventory module to modify RPM
-local function hookFirearmInventory()
-    if RapidFire.hooked or RapidFire.hookInProgress then
-        return true
-    end
-
-    RapidFire.hookInProgress = true
-
-    local FirearmInventory = requireModuleByName("FirearmInventory")
-    if not FirearmInventory then
-        RapidFire.hookInProgress = false
-        warn("[Aeon] Failed to find FirearmInventory module")
-        return false
-    end
-
-    -- Hook the _discharge function (called when weapon fires)
-    local oldDischarge = FirearmInventory._discharge
-    if type(oldDischarge) ~= "function" then
-        RapidFire.hookInProgress = false
-        warn("[Aeon] Failed to find _discharge function")
-        return false
-    end
-
-    RapidFire.originalDischarge = oldDischarge
-    FirearmInventory._discharge = function(self, ...)
-        local tune = self and self._config and self._config.Tune
-        if type(tune) == "table" then
-            if RapidFire.enabled then
-                if RapidFire.patchedConfigs[tune] == nil and type(tune.RPM) == "number" then
-                    RapidFire.patchedConfigs[tune] = tune.RPM
+-- Method 1: Direct config patching (most reliable for BRM5)
+local function patchWeaponConfigs()
+    local weaponConfigs = ReplicatedStorage:FindFirstChild("Shared")
+    if not weaponConfigs then return false end
+    
+    weaponConfigs = weaponConfigs:FindFirstChild("Configs")
+    if not weaponConfigs then return false end
+    
+    weaponConfigs = weaponConfigs:FindFirstChild("Weapon")
+    if not weaponConfigs then return false end
+    
+    local patchedCount = 0
+    
+    -- Iterate through all weapon config modules
+    for _, weaponFolder in pairs(weaponConfigs:GetChildren()) do
+        if weaponFolder:IsA("Folder") then
+            for _, configModule in pairs(weaponFolder:GetDescendants()) do
+                if configModule:IsA("ModuleScript") then
+                    local success, config = pcall(require, configModule)
+                    if success and type(config) == "table" then
+                        -- Look for Tune table with RPM
+                        if config.Tune and type(config.Tune) == "table" and type(config.Tune.RPM) == "number" then
+                            -- Save original RPM if not already saved
+                            if not RapidFire.originalConfigs[config.Tune] then
+                                RapidFire.originalConfigs[config.Tune] = config.Tune.RPM
+                            end
+                            
+                            -- Apply rapid fire if enabled
+                            if RapidFire.enabled then
+                                config.Tune.RPM = RapidFire.rpm
+                                patchedCount = patchedCount + 1
+                            end
+                        end
+                    end
                 end
-                tune.RPM = RapidFire.rpm
-            elseif RapidFire.patchedConfigs[tune] ~= nil then
-                tune.RPM = RapidFire.patchedConfigs[tune]
-                RapidFire.patchedConfigs[tune] = nil
             end
         end
-
-        return oldDischarge(self, ...)
     end
+    
+    return patchedCount > 0
+end
 
-    RapidFire.hooked = true
-    RapidFire.hookInProgress = false
-    return true
+-- Method 2: Hook Item module (fallback)
+local function hookItemModule()
+    local itemModule = ReplicatedStorage:FindFirstChild("Shared")
+    if itemModule then
+        itemModule = itemModule:FindFirstChild("Inventory")
+        if itemModule then
+            itemModule = itemModule:FindFirstChild("Item")
+            if itemModule and itemModule:IsA("ModuleScript") then
+                local success, Item = pcall(require, itemModule)
+                if success and type(Item) == "table" then
+                    -- Try to hook any fire-related methods
+                    for key, value in pairs(Item) do
+                        if type(value) == "function" and (key:lower():find("fire") or key:lower():find("shoot") or key:lower():find("discharge")) then
+                            local original = value
+                            Item[key] = function(...)
+                                -- Patch configs before firing
+                                if RapidFire.enabled then
+                                    patchWeaponConfigs()
+                                end
+                                return original(...)
+                            end
+                            return true
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return false
 end
 
 -- Public API
 function RapidFire.Enable()
     RapidFire.enabled = true
-
-    -- Try to hook if not already hooked
-    if not RapidFire.hooked then
+    
+    -- Try direct patching first
+    local success = patchWeaponConfigs()
+    
+    if not success then
+        -- Fallback to hooking
         task.spawn(function()
-            local success = hookFirearmInventory()
-            if not success then
-                warn("[Aeon] Rapid Fire: Failed to hook FirearmInventory")
+            local hooked = hookItemModule()
+            if not hooked then
+                warn("[Aeon] Rapid Fire: Failed to patch weapon configs")
             end
         end)
     end
+    
+    RapidFire.hooked = true
 end
 
 function RapidFire.Disable()
     RapidFire.enabled = false
-
-    for tune, originalRPM in pairs(RapidFire.patchedConfigs) do
+    
+    -- Restore original RPM values
+    for tune, originalRPM in pairs(RapidFire.originalConfigs) do
         if type(tune) == "table" and type(originalRPM) == "number" then
             tune.RPM = originalRPM
         end
-        RapidFire.patchedConfigs[tune] = nil
     end
 end
 
@@ -127,6 +127,11 @@ end
 function RapidFire.UpdateSettings(settings)
     if settings.RPM ~= nil then
         RapidFire.rpm = math.clamp(settings.RPM, 45, 10000)
+        
+        -- Re-apply if already enabled
+        if RapidFire.enabled then
+            patchWeaponConfigs()
+        end
     end
 end
 
