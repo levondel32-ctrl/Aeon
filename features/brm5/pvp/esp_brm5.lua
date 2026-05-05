@@ -6,8 +6,6 @@
 local ESP = {
     enabled = false,
     colorConnection = nil,
-    descendantAddedConnection = nil,
-    descendantRemovingConnection = nil,
     trackedModels = {},
     settings = {
         showNames = true,
@@ -219,7 +217,6 @@ local function initializeExistingModels()
     for _, player in ipairs(Players:GetPlayers()) do
         bindPlayer(player)
     end
-    addConnection(Players.PlayerAdded:Connect(bindPlayer))
 
     -- Сканируем текущие модели в Workspace
     local descendants = Workspace:GetDescendants()
@@ -289,6 +286,7 @@ function ESP.Enable()
     task.spawn(initializeExistingModels)
 
     -- Подключаем события
+    addConnection(Players.PlayerAdded:Connect(bindPlayer))
     addConnection(Workspace.DescendantAdded:Connect(onDescendantAdded))
     addConnection(Workspace.DescendantRemoving:Connect(onDescendantRemoving))
     addConnection(Workspace.ChildAdded:Connect(function(child)
