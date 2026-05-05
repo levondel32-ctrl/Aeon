@@ -11,8 +11,6 @@ local NoRecoil = loadstring(game:HttpGet("https://raw.githubusercontent.com/levo
 local Fullbright = loadstring(game:HttpGet("https://raw.githubusercontent.com/levondel32-ctrl/Aeon/main/features/brm5/pvp/fullbright_brm5.lua"))()
 local Wall = loadstring(game:HttpGet("https://raw.githubusercontent.com/levondel32-ctrl/Aeon/main/features/brm5/pvp/wall.lua"))()
 local AllyScan = loadstring(game:HttpGet("https://raw.githubusercontent.com/levondel32-ctrl/Aeon/main/features/brm5/pvp/ally_scan.lua"))()
-local TargetSizingPVP = loadstring(game:HttpGet("https://raw.githubusercontent.com/levondel32-ctrl/Aeon/main/features/brm5/pvp/target_sizing_brm5.lua"))()
-local TargetSizingPVE = loadstring(game:HttpGet("https://raw.githubusercontent.com/levondel32-ctrl/Aeon/main/features/brm5/pve/target_sizing_brm5.lua"))()
 
 -- Export to global environment for UI access
 getgenv().BRM5_Features = {
@@ -22,9 +20,7 @@ getgenv().BRM5_Features = {
     NoRecoil = NoRecoil,
     Fullbright = Fullbright,
     Wall = Wall,
-    AllyScan = AllyScan,
-    TargetSizingPVP = TargetSizingPVP,
-    TargetSizingPVE = TargetSizingPVE
+    AllyScan = AllyScan
 }
 
 -- Load UI configuration
