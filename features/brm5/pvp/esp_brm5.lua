@@ -6,8 +6,6 @@
 local ESP = {
     enabled = false,
     colorConnection = nil,
-    descendantAddedConnection = nil,
-    descendantRemovingConnection = nil,
     trackedModels = {},
 
     settings = {
@@ -53,9 +51,15 @@ raycastParams.IgnoreWater = true
 local raycastFilter = {}
 
 local pendingModels = {}
+local connections = {}
 local colorAccumulator = 0
 local INITIAL_SCAN_BATCH = 120
 local UPDATE_INTERVAL = 0.12
+
+local function addConnection(conn)
+	table.insert(connections, conn)
+	return conn
+end
 
 local function refreshRaycastFilter()
 	table.clear(raycastFilter)
@@ -65,37 +69,60 @@ local function refreshRaycastFilter()
 	raycastParams.FilterDescendantsInstances = raycastFilter
 end
 
-local function isNPC(model)
-	-- NPC = любая модель с Humanoid, которая не принадлежит игроку
-	return model and Players:GetPlayerFromCharacter(model) == nil
+local function isNPCByName(model)
+	return model and ESP.npcNames[model.Name] == true
 end
 
-local function shouldTrackModel(model)
+local function isPlayerCharacter(model)
+	local player = Players:GetPlayerFromCharacter(model)
+	return player ~= nil
+end
+
+local function classifyModel(model)
 	if not model or not model:IsA("Model") then
-		return false
+		return nil
 	end
 
 	if model == LocalPlayer.Character then
-		return false
+		return nil
 	end
 
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	if not humanoid or humanoid.Health <= 0 then
-		return false
+		return nil
 	end
 
-	local player = Players:GetPlayerFromCharacter(model)
-	if player then
-		-- это игрок
-		return true, false
+	-- Ждём, пока персонаж игрока/модели полностью зарегистрируется
+	for _ = 1, 12 do
+		if not ESP.enabled then
+			return nil
+		end
+
+		if model == LocalPlayer.Character then
+			return nil
+		end
+
+		if isPlayerCharacter(model) then
+			return true, false
+		end
+
+		if isNPCByName(model) then
+			return true, true
+		end
+
+		if not model.Parent then
+			return nil
+		end
+
+		task.wait(0.05)
 	end
 
-	-- это NPC
-	if not ESP.settings.showNPCs then
-		return false
-	end
-
+	-- Фоллбек: если за таймаут игрок не распознан, считаем NPC
 	return true, true
+end
+
+local function shouldTrackModel(model)
+	return classifyModel(model)
 end
 
 local function addHighlight(model, isNPCModel)
@@ -161,14 +188,15 @@ local function queueModel(model)
 
 	pendingModels[model] = true
 
-	task.defer(function()
+	task.spawn(function()
+		local shouldTrack, isNPCModel = classifyModel(model)
+
 		pendingModels[model] = nil
 
 		if not ESP.enabled or not model or not model.Parent then
 			return
 		end
 
-		local shouldTrack, isNPCModel = shouldTrackModel(model)
 		if shouldTrack then
 			addHighlight(model, isNPCModel)
 		end
@@ -180,12 +208,7 @@ local function onDescendantAdded(descendant)
 		return
 	end
 
-	if descendant:IsA("Model") then
-		queueModel(descendant)
-		return
-	end
-
-	local model = descendant:FindFirstAncestorOfClass("Model")
+	local model = descendant:IsA("Model") and descendant or descendant:FindFirstAncestorOfClass("Model")
 	if model then
 		queueModel(model)
 	end
@@ -201,21 +224,28 @@ local function onDescendantRemoving(descendant)
 	end
 end
 
+local function bindPlayer(player)
+	if player.Character then
+		task.delay(0.1, function()
+			queueModel(player.Character)
+		end)
+	end
+
+	addConnection(player.CharacterAdded:Connect(function(character)
+		task.delay(0.15, function()
+			queueModel(character)
+		end)
+	end))
+end
+
 local function initializeExistingModels()
-	local descendants = Workspace:GetDescendants()
+	for _, player in ipairs(Players:GetPlayers()) do
+		bindPlayer(player)
+	end
 
-	for i = 1, #descendants do
-		local descendant = descendants[i]
-
-		if descendant:IsA("Model") then
-			local shouldTrack, isNPCModel = shouldTrackModel(descendant)
-			if shouldTrack then
-				addHighlight(descendant, isNPCModel)
-			end
-		end
-
-		if i % INITIAL_SCAN_BATCH == 0 then
-			task.wait()
+	for _, child in ipairs(Workspace:GetChildren()) do
+		if child:IsA("Model") then
+			queueModel(child)
 		end
 	end
 end
@@ -282,8 +312,15 @@ function ESP.Enable()
 
 	task.spawn(initializeExistingModels)
 
-	ESP.descendantAddedConnection = Workspace.DescendantAdded:Connect(onDescendantAdded)
-	ESP.descendantRemovingConnection = Workspace.DescendantRemoving:Connect(onDescendantRemoving)
+	addConnection(Players.PlayerAdded:Connect(bindPlayer))
+	addConnection(Workspace.ChildAdded:Connect(function(child)
+		if child:IsA("Model") then
+			queueModel(child)
+		end
+	end))
+
+	addConnection(Workspace.DescendantAdded:Connect(onDescendantAdded))
+	addConnection(Workspace.DescendantRemoving:Connect(onDescendantRemoving))
 
 	ESP.colorConnection = RunService.Heartbeat:Connect(function(dt)
 		if not ESP.enabled then
@@ -305,20 +342,15 @@ function ESP.Disable()
 	colorAccumulator = 0
 	table.clear(pendingModels)
 
-	if ESP.descendantAddedConnection then
-		ESP.descendantAddedConnection:Disconnect()
-		ESP.descendantAddedConnection = nil
-	end
-
-	if ESP.descendantRemovingConnection then
-		ESP.descendantRemovingConnection:Disconnect()
-		ESP.descendantRemovingConnection = nil
-	end
-
 	if ESP.colorConnection then
 		ESP.colorConnection:Disconnect()
 		ESP.colorConnection = nil
 	end
+
+	for _, conn in ipairs(connections) do
+		conn:Disconnect()
+	end
+	table.clear(connections)
 
 	for model in pairs(ESP.trackedModels) do
 		removeHighlight(model)
