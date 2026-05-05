@@ -110,19 +110,23 @@ function Aimbot:getClosestHead(camera)
     local closestTarget, minDistance = nil, math.huge
     local screenCenter = getScreenCenter(camera)
 
-    -- Find all Male models
+    -- Find all models with Humanoid
     for _, desc in pairs(Workspace:GetDescendants()) do
-        if desc.Name == "Male" and desc:IsA("Model") then
-            -- Skip local player
-            if LocalPlayer.Character ~= desc then
-                local head = desc:FindFirstChild("Head")
-                if head and head:IsA("BasePart") then
-                    local targetPosition, onScreen = camera:WorldToViewportPoint(head.Position)
-                    if onScreen then
-                        local distanceToCenter = (Vector2.new(targetPosition.X, targetPosition.Y) - screenCenter).Magnitude
-                        if (not self.fovEnabled or distanceToCenter <= self.fovRadius) and distanceToCenter < minDistance then
-                            closestTarget = head
-                            minDistance = distanceToCenter
+        if desc:IsA("Model") then
+            -- Check if model has Humanoid
+            local humanoid = desc:FindFirstChildOfClass("Humanoid")
+            if humanoid and humanoid.Health > 0 then
+                -- Skip local player
+                if LocalPlayer.Character ~= desc then
+                    local head = desc:FindFirstChild("Head")
+                    if head and head:IsA("BasePart") then
+                        local targetPosition, onScreen = camera:WorldToViewportPoint(head.Position)
+                        if onScreen then
+                            local distanceToCenter = (Vector2.new(targetPosition.X, targetPosition.Y) - screenCenter).Magnitude
+                            if (not self.fovEnabled or distanceToCenter <= self.fovRadius) and distanceToCenter < minDistance then
+                                closestTarget = head
+                                minDistance = distanceToCenter
+                            end
                         end
                     end
                 end
