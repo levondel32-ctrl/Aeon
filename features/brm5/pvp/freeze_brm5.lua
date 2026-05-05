@@ -1,7 +1,7 @@
 --[[
     Freeze Target Feature for BRM5 PVP
-    Fixed version - prevents falling through ground
-    Uses BodyPosition + BodyGyro instead of Anchoring
+    Properly freezes Humanoid controller and physics
+    Fixed: Only anchors HumanoidRootPart to prevent falling through ground
 ]]
 
 local Players = game:GetService("Players")
@@ -12,9 +12,9 @@ local LocalPlayer = Players.LocalPlayer
 
 local Freeze = {
 	enabled = false,
-	frozenModels = {}, -- [Model] = { humanoid, oldWalkSpeed, oldJumpPower, bodyPosition, bodyGyro, attachment }
+	frozenModels = {}, -- [Model] = { humanoid = Humanoid, hrp = BasePart, oldWalkSpeed = number, oldJumpPower = number, frozenCFrame = CFrame }
 	connection = nil,
-	trackedModels = {}, -- Cache of Male models
+	trackedModels = {}, -- Cache of Male models to avoid GetDescendants spam
 	descendantConnection = nil,
 	removingConnection = nil,
 }
@@ -26,7 +26,7 @@ local function getHumanoid(model)
 	return model:FindFirstChildOfClass("Humanoid")
 end
 
-local function getRoot(model)
+local function getHumanoidRootPart(model)
 	if not model or not model:IsA("Model") then
 		return nil
 	end
@@ -60,7 +60,7 @@ local function freezeMale(maleModel)
 	end
 
 	local humanoid = getHumanoid(maleModel)
-	local hrp = getRoot(maleModel)
+	local hrp = getHumanoidRootPart(maleModel)
 	
 	if not humanoid or not hrp then
 		return false
@@ -84,33 +84,24 @@ local function freezeMale(maleModel)
 	humanoid.WalkSpeed = 0
 	humanoid.JumpPower = 0
 	humanoid.AutoRotate = false
-	humanoid.PlatformStand = true -- Disables Humanoid controller
-	
-	-- Create BodyPosition to hold position (with slight upward offset to prevent ground clipping)
-	local bodyPosition = Instance.new("BodyPosition")
-	bodyPosition.Position = hrp.Position + Vector3.new(0, 0.5, 0) -- Lift slightly above ground
-	bodyPosition.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-	bodyPosition.P = 10000
-	bodyPosition.D = 1000
-	bodyPosition.Parent = hrp
+	humanoid.PlatformStand = true -- This disables the Humanoid controller
 
-	-- Create BodyGyro to lock rotation
-	local bodyGyro = Instance.new("BodyGyro")
-	bodyGyro.CFrame = hrp.CFrame
-	bodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
-	bodyGyro.P = 10000
-	bodyGyro.D = 500
-	bodyGyro.Parent = hrp
+	-- Save current CFrame before anchoring
+	local frozenCFrame = hrp.CFrame
+	
+	-- CRITICAL: Only anchor HumanoidRootPart, NOT all parts
+	-- Anchoring all parts causes joints to break and character falls through ground
+	hrp.Anchored = true
+	hrp.AssemblyLinearVelocity = Vector3.zero
+	hrp.AssemblyAngularVelocity = Vector3.zero
 
 	-- Save state
 	Freeze.frozenModels[maleModel] = {
 		humanoid = humanoid,
+		hrp = hrp,
 		oldWalkSpeed = oldWalkSpeed,
 		oldJumpPower = oldJumpPower,
-		bodyPosition = bodyPosition,
-		bodyGyro = bodyGyro,
-		frozenPosition = hrp.Position + Vector3.new(0, 0.5, 0),
-		frozenCFrame = hrp.CFrame,
+		frozenCFrame = frozenCFrame,
 	}
 
 	return true
@@ -130,12 +121,9 @@ local function unfreezeMale(maleModel)
 		state.humanoid.PlatformStand = false
 	end
 
-	-- Remove BodyPosition and BodyGyro
-	if state.bodyPosition and state.bodyPosition.Parent then
-		state.bodyPosition:Destroy()
-	end
-	if state.bodyGyro and state.bodyGyro.Parent then
-		state.bodyGyro:Destroy()
+	-- Unanchor HumanoidRootPart
+	if state.hrp and state.hrp.Parent then
+		state.hrp.Anchored = false
 	end
 
 	Freeze.frozenModels[maleModel] = nil
@@ -174,21 +162,22 @@ local function freezeLoop()
 			if not Freeze.frozenModels[model] then
 				freezeMale(model)
 			else
-				-- Keep frozen in place
+				-- Keep frozen state maintained
 				local state = Freeze.frozenModels[model]
+				
+				-- Keep Humanoid disabled
 				if state.humanoid and state.humanoid.Parent then
-					-- Keep Humanoid disabled
 					state.humanoid.WalkSpeed = 0
 					state.humanoid.JumpPower = 0
 					state.humanoid.PlatformStand = true
 				end
 				
-				-- Update BodyPosition and BodyGyro to maintain freeze
-				if state.bodyPosition and state.bodyPosition.Parent then
-					state.bodyPosition.Position = state.frozenPosition
-				end
-				if state.bodyGyro and state.bodyGyro.Parent then
-					state.bodyGyro.CFrame = state.frozenCFrame
+				-- Keep HRP anchored and in frozen position
+				if state.hrp and state.hrp.Parent then
+					state.hrp.Anchored = true
+					state.hrp.CFrame = state.frozenCFrame
+					state.hrp.AssemblyLinearVelocity = Vector3.zero
+					state.hrp.AssemblyAngularVelocity = Vector3.zero
 				end
 			end
 		end
