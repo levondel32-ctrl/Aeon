@@ -1,6 +1,6 @@
 --[[
     Freeze Target Feature for BRM5 PVP
-    Freeze is controlled by toggle state only.
+    Properly freezes Humanoid controller and animations
 ]]
 
 local Players = game:GetService("Players")
@@ -11,28 +11,47 @@ local LocalPlayer = Players.LocalPlayer
 
 local Freeze = {
 	enabled = false,
-	frozenModels = {}, -- [Model] = { cframe = CFrame, bodyVelocity = Instance, bodyGyro = Instance, humanoid = Humanoid, oldWalkSpeed = number, animator = Animator }
+	frozenModels = {}, -- [Model] = { humanoid = Humanoid, oldWalkSpeed = number, oldJumpPower = number, parts = {[BasePart] = CFrame} }
 	connection = nil,
+	trackedModels = {}, -- Cache of Male models to avoid GetDescendants spam
+	descendantConnection = nil,
+	removingConnection = nil,
 }
 
-local function getRoot(model)
+local function getHumanoid(model)
 	if not model or not model:IsA("Model") then
 		return nil
 	end
-	return model:FindFirstChild("HumanoidRootPart")
+	return model:FindFirstChildOfClass("Humanoid")
+end
+
+local function isValidTarget(model)
+	if not model or not model:IsA("Model") then
+		return false
+	end
+	
+	if model.Name ~= "Male" then
+		return false
+	end
+	
+	if model == LocalPlayer.Character then
+		return false
+	end
+	
+	local humanoid = getHumanoid(model)
+	if not humanoid or humanoid.Health <= 0 then
+		return false
+	end
+	
+	return true
 end
 
 local function freezeMale(maleModel)
-	local hrp = getRoot(maleModel)
-	if not hrp then
-		return false
-	end
-
 	if Freeze.frozenModels[maleModel] then
 		return true
 	end
 
-	local humanoid = maleModel:FindFirstChildOfClass("Humanoid")
+	local humanoid = getHumanoid(maleModel)
 	if not humanoid then
 		return false
 	end
@@ -41,51 +60,39 @@ local function freezeMale(maleModel)
 	local animator = humanoid:FindFirstChildOfClass("Animator")
 	if animator then
 		for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
-			track:Stop(0)
+			pcall(function()
+				track:Stop(0)
+			end)
 		end
 	end
 
-	-- Disable Humanoid movement controller
+	-- Save original values
 	local oldWalkSpeed = humanoid.WalkSpeed
+	local oldJumpPower = humanoid.JumpPower
+
+	-- Disable Humanoid movement completely
 	humanoid.WalkSpeed = 0
 	humanoid.JumpPower = 0
 	humanoid.AutoRotate = false
+	humanoid.PlatformStand = true -- This disables the Humanoid controller
 	
-	-- Set Humanoid state to Physics to disable internal controller
-	pcall(function()
-		humanoid:ChangeState(Enum.HumanoidStateType.Physics)
-	end)
-
-	-- Anchor all body parts to completely freeze physics
+	-- Anchor all parts and save their CFrames
+	local partsCFrames = {}
 	for _, part in ipairs(maleModel:GetDescendants()) do
-		if part:IsA("BasePart") and part ~= hrp then
+		if part:IsA("BasePart") then
+			partsCFrames[part] = part.CFrame
 			part.Anchored = true
+			part.AssemblyLinearVelocity = Vector3.zero
+			part.AssemblyAngularVelocity = Vector3.zero
 		end
 	end
 
-	-- Create BodyVelocity to lock position
-	local bodyVelocity = Instance.new("BodyVelocity")
-	bodyVelocity.Velocity = Vector3.zero
-	bodyVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-	bodyVelocity.P = 10000
-	bodyVelocity.Parent = hrp
-
-	-- Create BodyGyro to lock rotation
-	local bodyGyro = Instance.new("BodyGyro")
-	bodyGyro.CFrame = hrp.CFrame
-	bodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
-	bodyGyro.P = 10000
-	bodyGyro.D = 500
-	bodyGyro.Parent = hrp
-
 	-- Save state
 	Freeze.frozenModels[maleModel] = {
-		cframe = hrp.CFrame,
-		bodyVelocity = bodyVelocity,
-		bodyGyro = bodyGyro,
 		humanoid = humanoid,
 		oldWalkSpeed = oldWalkSpeed,
-		animator = animator,
+		oldJumpPower = oldJumpPower,
+		parts = partsCFrames,
 	}
 
 	return true
@@ -100,28 +107,16 @@ local function unfreezeMale(maleModel)
 	-- Restore Humanoid settings
 	if state.humanoid and state.humanoid.Parent then
 		state.humanoid.WalkSpeed = state.oldWalkSpeed
-		state.humanoid.JumpPower = 50
+		state.humanoid.JumpPower = state.oldJumpPower
 		state.humanoid.AutoRotate = true
-		
-		-- Restore normal state
-		pcall(function()
-			state.humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
-		end)
+		state.humanoid.PlatformStand = false
 	end
 
-	-- Unanchor all body parts
-	for _, part in ipairs(maleModel:GetDescendants()) do
-		if part:IsA("BasePart") then
+	-- Unanchor all parts
+	for part in pairs(state.parts) do
+		if part and part.Parent then
 			part.Anchored = false
 		end
-	end
-
-	-- Remove BodyVelocity and BodyGyro
-	if state.bodyVelocity and state.bodyVelocity.Parent then
-		state.bodyVelocity:Destroy()
-	end
-	if state.bodyGyro and state.bodyGyro.Parent then
-		state.bodyGyro:Destroy()
 	end
 
 	Freeze.frozenModels[maleModel] = nil
@@ -133,41 +128,76 @@ local function unfreezeAll()
 	end
 end
 
+local function cleanupInvalidModels()
+	-- Clean up tracked models that no longer exist
+	for model in pairs(Freeze.trackedModels) do
+		if not model or not model.Parent then
+			Freeze.trackedModels[model] = nil
+		end
+	end
+	
+	-- Clean up frozen models that no longer exist
+	for model in pairs(Freeze.frozenModels) do
+		if not model or not model.Parent then
+			unfreezeMale(model)
+		end
+	end
+end
+
 local function freezeLoop()
 	if not Freeze.enabled then
-		unfreezeAll()
 		return
 	end
 
-	for _, desc in ipairs(Workspace:GetDescendants()) do
-		if desc:IsA("Model") and desc.Name == "Male" then
-			if LocalPlayer.Character ~= desc then
-				local hrp = getRoot(desc)
-				if hrp and Freeze.frozenModels[desc] then
-					-- Keep frozen position locked
-					local state = Freeze.frozenModels[desc]
-					if state.bodyVelocity and state.bodyVelocity.Parent then
-						state.bodyVelocity.Velocity = Vector3.zero
-						hrp.CFrame = state.cframe
-					end
-					if state.bodyGyro and state.bodyGyro.Parent then
-						state.bodyGyro.CFrame = state.cframe
-					end
-					
+	-- Freeze all tracked models
+	for model in pairs(Freeze.trackedModels) do
+		if model and model.Parent and isValidTarget(model) then
+			if not Freeze.frozenModels[model] then
+				freezeMale(model)
+			else
+				-- Keep parts anchored and in position
+				local state = Freeze.frozenModels[model]
+				if state.humanoid and state.humanoid.Parent then
 					-- Keep Humanoid disabled
-					if state.humanoid and state.humanoid.Parent then
-						state.humanoid.WalkSpeed = 0
-						state.humanoid.JumpPower = 0
-						pcall(function()
-							if state.humanoid:GetState() ~= Enum.HumanoidStateType.Physics then
-								state.humanoid:ChangeState(Enum.HumanoidStateType.Physics)
-							end
-						end)
+					state.humanoid.WalkSpeed = 0
+					state.humanoid.JumpPower = 0
+					state.humanoid.PlatformStand = true
+				end
+				
+				-- Keep parts frozen in place
+				for part, cframe in pairs(state.parts) do
+					if part and part.Parent then
+						part.Anchored = true
+						part.CFrame = cframe
+						part.AssemblyLinearVelocity = Vector3.zero
+						part.AssemblyAngularVelocity = Vector3.zero
 					end
-				else
-					freezeMale(desc)
 				end
 			end
+		end
+	end
+	
+	-- Periodic cleanup (every ~3 seconds)
+	if math.random(1, 180) == 1 then
+		cleanupInvalidModels()
+	end
+end
+
+local function onDescendantAdded(descendant)
+	if not Freeze.enabled then
+		return
+	end
+	
+	if descendant:IsA("Model") and isValidTarget(descendant) then
+		Freeze.trackedModels[descendant] = true
+	end
+end
+
+local function onDescendantRemoving(descendant)
+	if descendant:IsA("Model") and Freeze.trackedModels[descendant] then
+		Freeze.trackedModels[descendant] = nil
+		if Freeze.frozenModels[descendant] then
+			unfreezeMale(descendant)
 		end
 	end
 end
@@ -175,6 +205,23 @@ end
 function Freeze.Enable()
 	Freeze.enabled = true
 
+	-- Initial scan for Male models
+	for _, desc in ipairs(Workspace:GetDescendants()) do
+		if desc:IsA("Model") and isValidTarget(desc) then
+			Freeze.trackedModels[desc] = true
+		end
+	end
+
+	-- Setup event listeners to track new/removed models
+	if not Freeze.descendantConnection then
+		Freeze.descendantConnection = Workspace.DescendantAdded:Connect(onDescendantAdded)
+	end
+	
+	if not Freeze.removingConnection then
+		Freeze.removingConnection = Workspace.DescendantRemoving:Connect(onDescendantRemoving)
+	end
+
+	-- Start freeze loop
 	if not Freeze.connection then
 		Freeze.connection = RunService.Heartbeat:Connect(freezeLoop)
 	end
@@ -183,10 +230,24 @@ end
 function Freeze.Disable()
 	Freeze.enabled = false
 	unfreezeAll()
+	
+	-- Clear tracked models
+	table.clear(Freeze.trackedModels)
 
+	-- Disconnect all connections
 	if Freeze.connection then
 		Freeze.connection:Disconnect()
 		Freeze.connection = nil
+	end
+	
+	if Freeze.descendantConnection then
+		Freeze.descendantConnection:Disconnect()
+		Freeze.descendantConnection = nil
+	end
+	
+	if Freeze.removingConnection then
+		Freeze.removingConnection:Disconnect()
+		Freeze.removingConnection = nil
 	end
 end
 
