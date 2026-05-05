@@ -70,11 +70,6 @@ local function classifyModel(model)
         return false
     end
 
-    -- Пропускаем уже убитых (раґдолл)
-    if model:FindFirstChildWhichIsA("BallSocketConstraint", true) then
-        return false
-    end
-
     -- Проверяем: принадлежит ли модель игроку?
     local player = Players:GetPlayerFromCharacter(model)
     if player then
@@ -86,18 +81,13 @@ local function classifyModel(model)
         return false
     end
 
-    -- Проверка имени: BRM5 NPC обычно имеют "AI_" или содержат "Bot"
-    local nameLower = model.Name:lower()
-    if nameLower:find("^ai") or nameLower:find("bot") then
-        return true, true   -- это NPC
-    end
-
     -- Проверка списка известных NPC по имени
     if ESP.npcNames[model.Name] then
         return true, true
     end
 
-    return false
+    -- Если не игрок и не в списке NPC, но имеет Humanoid - считаем NPC
+    return true, true
 end
 
 -- Добавляем подсветку (Highlight) к модели
