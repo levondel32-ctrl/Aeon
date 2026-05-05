@@ -66,7 +66,8 @@ local function refreshRaycastFilter()
 end
 
 local function isNPC(model)
-	return model and ESP.npcNames[model.Name] or false
+	-- NPC = любая модель с Humanoid, которая не принадлежит игроку
+	return model and Players:GetPlayerFromCharacter(model) == nil
 end
 
 local function shouldTrackModel(model)
@@ -79,26 +80,22 @@ local function shouldTrackModel(model)
 	end
 
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
-	if not humanoid then
+	if not humanoid or humanoid.Health <= 0 then
 		return false
 	end
 
-	if humanoid.Health <= 0 then
+	local player = Players:GetPlayerFromCharacter(model)
+	if player then
+		-- это игрок
+		return true, false
+	end
+
+	-- это NPC
+	if not ESP.settings.showNPCs then
 		return false
 	end
 
-	local isMale = model.Name == "Male"
-	local isNPCModel = isNPC(model)
-
-	if not (isMale or isNPCModel) then
-		return false
-	end
-
-	if isNPCModel and not ESP.settings.showNPCs then
-		return false
-	end
-
-	return true, isNPCModel
+	return true, true
 end
 
 local function addHighlight(model, isNPCModel)
@@ -257,6 +254,7 @@ local function updateColors()
 						highlight.Enabled = false
 					else
 						local color
+
 						if data.isNPC then
 							color = ESP.settings.npcColor
 						else
