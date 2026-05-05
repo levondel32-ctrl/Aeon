@@ -13,7 +13,9 @@ local Aimbot = {
     fovRadius = 100,
     fovColor = Color3.fromRGB(255, 255, 255),
     smoothing = 95,
-    deadzone = 1.5
+    deadzone = 1.5,
+    targetCache = {},  -- Кэш для целей
+    lastCacheUpdate = 0
 }
 
 local Players = game:GetService("Players")
@@ -102,33 +104,51 @@ function Aimbot:updateFOVCircle(camera)
     end
 end
 
+function Aimbot:updateTargetCache()
+    -- Обновляем кэш только раз в 0.5 секунды
+    local currentTime = tick()
+    if currentTime - self.lastCacheUpdate < 0.5 then
+        return
+    end
+    self.lastCacheUpdate = currentTime
+    
+    -- Очищаем старый кэш
+    table.clear(self.targetCache)
+    
+    -- Находим все модели с Humanoid
+    for _, desc in pairs(Workspace:GetDescendants()) do
+        if desc:IsA("Model") then
+            local humanoid = desc:FindFirstChildOfClass("Humanoid")
+            if humanoid and humanoid.Health > 0 and LocalPlayer.Character ~= desc then
+                local head = desc:FindFirstChild("Head")
+                if head and head:IsA("BasePart") then
+                    table.insert(self.targetCache, head)
+                end
+            end
+        end
+    end
+end
+
 function Aimbot:getClosestHead(camera)
     if not camera then
         return nil
     end
 
+    -- Обновляем кэш целей
+    self:updateTargetCache()
+
     local closestTarget, minDistance = nil, math.huge
     local screenCenter = getScreenCenter(camera)
 
-    -- Find all models with Humanoid
-    for _, desc in pairs(Workspace:GetDescendants()) do
-        if desc:IsA("Model") then
-            -- Check if model has Humanoid
-            local humanoid = desc:FindFirstChildOfClass("Humanoid")
-            if humanoid and humanoid.Health > 0 then
-                -- Skip local player
-                if LocalPlayer.Character ~= desc then
-                    local head = desc:FindFirstChild("Head")
-                    if head and head:IsA("BasePart") then
-                        local targetPosition, onScreen = camera:WorldToViewportPoint(head.Position)
-                        if onScreen then
-                            local distanceToCenter = (Vector2.new(targetPosition.X, targetPosition.Y) - screenCenter).Magnitude
-                            if (not self.fovEnabled or distanceToCenter <= self.fovRadius) and distanceToCenter < minDistance then
-                                closestTarget = head
-                                minDistance = distanceToCenter
-                            end
-                        end
-                    end
+    -- Ищем ближайшую цель из кэша
+    for _, head in ipairs(self.targetCache) do
+        if head and head.Parent then
+            local targetPosition, onScreen = camera:WorldToViewportPoint(head.Position)
+            if onScreen then
+                local distanceToCenter = (Vector2.new(targetPosition.X, targetPosition.Y) - screenCenter).Magnitude
+                if (not self.fovEnabled or distanceToCenter <= self.fovRadius) and distanceToCenter < minDistance then
+                    closestTarget = head
+                    minDistance = distanceToCenter
                 end
             end
         end
@@ -166,6 +186,8 @@ function Aimbot:cleanup()
     self.fovCircle = nil
     self.fovStroke = nil
     self.holdingKey = false
+    table.clear(self.targetCache)
+    self.lastCacheUpdate = 0
 end
 
 -- Public API
@@ -185,16 +207,16 @@ function Aimbot.IsActive()
 end
 
 function Aimbot.UpdateSettings(settings)
-    if settings.FOVRadius then
+    if settings.FOVRadius ~= nil then
         Aimbot.fovRadius = math.clamp(settings.FOVRadius, 0, 500)
     end
-    if settings.Smoothness then
+    if settings.Smoothness ~= nil then
         Aimbot.smoothing = math.clamp(settings.Smoothness, 0, 100)
     end
     if settings.DrawFOV ~= nil then
         Aimbot.fovEnabled = settings.DrawFOV
     end
-    if settings.FOVColor then
+    if settings.FOVColor ~= nil then
         Aimbot.fovColor = settings.FOVColor
     end
 end
