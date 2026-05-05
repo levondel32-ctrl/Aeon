@@ -15,6 +15,7 @@ local Aimbot = BRM.Aimbot
 local Freeze = BRM.Freeze
 local NoRecoil = BRM.NoRecoil
 local Fullbright = BRM.Fullbright
+local RapidFire = BRM.RapidFire
 local Wall = BRM.Wall
 local AllyScan = BRM.AllyScan
 
@@ -60,6 +61,7 @@ local function cleanup()
 	Aimbot.Disable()
 	Freeze.Disable()
 	Fullbright.Disable()
+	RapidFire.Disable()
 end
 
 -- Create UI Window
@@ -161,6 +163,28 @@ WeaponSection:AddToggle({
 	Callback = function(v)
 		local ReplicatedStorage = game:GetService("ReplicatedStorage")
 		NoRecoil.patchWeapons(ReplicatedStorage, { recoil = false, firemodes = v })
+	end
+})
+
+local RapidFireSection = CombatTab:CreateSection({ Name = "Rapid Fire", Side = "Right" })
+
+RapidFireSection:AddToggle({
+	Name = "Enable Rapid Fire",
+	Flag = "BRM5_RapidFireEnabled",
+	Value = false,
+	Callback = function(v)
+		RapidFire.Toggle(v)
+	end
+})
+
+RapidFireSection:AddSlider({
+	Name = "RPM",
+	Flag = "BRM5_RapidFireRPM",
+	Value = 1000,
+	Min = 45,
+	Max = 1000,
+	Callback = function(v)
+		RapidFire.UpdateSettings({ RPM = v })
 	end
 })
 

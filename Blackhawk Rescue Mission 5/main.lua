@@ -9,6 +9,7 @@ local Aimbot = loadstring(game:HttpGet("https://raw.githubusercontent.com/levond
 local Freeze = loadstring(game:HttpGet("https://raw.githubusercontent.com/levondel32-ctrl/Aeon/main/features/brm5/pvp/freeze_brm5.lua"))()
 local NoRecoil = loadstring(game:HttpGet("https://raw.githubusercontent.com/levondel32-ctrl/Aeon/main/features/brm5/pvp/norecoil_brm5.lua"))()
 local Fullbright = loadstring(game:HttpGet("https://raw.githubusercontent.com/levondel32-ctrl/Aeon/main/features/brm5/pvp/fullbright_brm5.lua"))()
+local RapidFire = loadstring(game:HttpGet("https://raw.githubusercontent.com/levondel32-ctrl/Aeon/main/features/brm5/pvp/rapid_fire_brm5.lua"))()
 local Wall = loadstring(game:HttpGet("https://raw.githubusercontent.com/levondel32-ctrl/Aeon/main/features/brm5/pvp/wall.lua"))()
 local AllyScan = loadstring(game:HttpGet("https://raw.githubusercontent.com/levondel32-ctrl/Aeon/main/features/brm5/pvp/ally_scan.lua"))()
 
@@ -20,6 +21,7 @@ genv.BRM5_Features = {
     Freeze = Freeze,
     NoRecoil = NoRecoil,
     Fullbright = Fullbright,
+    RapidFire = RapidFire,
     Wall = Wall,
     AllyScan = AllyScan
 }
