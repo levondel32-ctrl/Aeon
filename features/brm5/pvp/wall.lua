@@ -120,42 +120,67 @@ function Walls:updateColors(camera, workspace, localPlayer, config)
         return
     end
 
-    local raycastParams = RaycastParams.new()
-    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
-    raycastParams.FilterDescendantsInstances = {}
-    if localPlayer and localPlayer.Character then
-        table.insert(raycastParams.FilterDescendantsInstances, localPlayer.Character)
+    -- Reuse raycast params to avoid creating new objects every frame
+    if not self.raycastParams then
+        self.raycastParams = RaycastParams.new()
+        self.raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+    end
+    
+    -- Update filter only when character changes
+    local character = localPlayer and localPlayer.Character
+    if character ~= self.lastCharacter then
+        self.lastCharacter = character
+        self.raycastParams.FilterDescendantsInstances = character and {character} or {}
     end
 
-    -- Colors are refreshed by raycasting from the camera to each tracked head.
-    -- The box stays hidden for ragdolled/dead models that expose constraints.
     local cameraPosition = camera.CFrame.Position
+    local headsToRemove = {}
+    
+    -- Batch process heads - limit raycasts per frame to prevent freezes
+    local processedCount = 0
+    local MAX_RAYCASTS_PER_FRAME = 10
+    
     for head in pairs(self.trackedHeads) do
         if not head or not head.Parent or not head:IsDescendantOf(workspace) then
-            self.trackedHeads[head] = nil
+            table.insert(headsToRemove, head)
         else
             local model = head.Parent
-            if model:FindFirstChildWhichIsA("BallSocketConstraint", true) then
-                local hiddenBox = head:FindFirstChild("Wall_Box")
-                if hiddenBox then
-                    hiddenBox.Visible = false
+            local box = head:FindFirstChild("Wall_Box")
+            
+            if not box then
+                self:createBoxForHead(head, config)
+                box = head:FindFirstChild("Wall_Box")
+            end
+            
+            if box then
+                -- Check for ragdoll/dead state (cached in model to avoid repeated searches)
+                if not model:GetAttribute("IsRagdoll") then
+                    local hasConstraint = model:FindFirstChildWhichIsA("BallSocketConstraint", true)
+                    if hasConstraint then
+                        model:SetAttribute("IsRagdoll", true)
+                    end
                 end
-            else
-                local box = head:FindFirstChild("Wall_Box")
-                if not box then
-                    self:createBoxForHead(head, config)
-                    box = head:FindFirstChild("Wall_Box")
-                end
-
-                if box then
-                    local result = workspace:Raycast(cameraPosition, head.Position - cameraPosition, raycastParams)
-                    local isVisible = not result or result.Instance:IsDescendantOf(model)
-                    box.Visible = true
-                    box.Color3 = isVisible and config.visibleColor or config.hiddenColor
-                    box.Transparency = config.wallEnabled and config.BOX_TRANSPARENCY or 1
+                
+                if model:GetAttribute("IsRagdoll") then
+                    box.Visible = false
+                else
+                    -- Limit raycasts per frame
+                    if processedCount < MAX_RAYCASTS_PER_FRAME then
+                        local result = workspace:Raycast(cameraPosition, head.Position - cameraPosition, self.raycastParams)
+                        local isVisible = not result or result.Instance:IsDescendantOf(model)
+                        box.Visible = true
+                        box.Color3 = isVisible and config.visibleColor or config.hiddenColor
+                        box.Transparency = config.wallEnabled and config.BOX_TRANSPARENCY or 1
+                        processedCount = processedCount + 1
+                    end
                 end
             end
         end
+    end
+    
+    -- Clean up invalid heads
+    for _, head in ipairs(headsToRemove) do
+        self.trackedHeads[head] = nil
     end
 end
 
@@ -166,6 +191,8 @@ function Walls:cleanup()
         end)
     end
     self.connections = {}
+    self.raycastParams = nil
+    self.lastCharacter = nil
     self:destroyAllBoxes()
 end
 

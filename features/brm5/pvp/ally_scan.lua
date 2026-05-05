@@ -33,6 +33,14 @@ function AllyScan:start(duration, services, walls, config)
 
     self.active = true
     local startedAt = tick()
+    
+    -- Cache all Male models at start to avoid repeated GetDescendants
+    local cachedModels = {}
+    for _, model in ipairs(services.Workspace:GetDescendants()) do
+        if model:IsA("Model") and model.Name == config.TARGET_NAME then
+            table.insert(cachedModels, model)
+        end
+    end
 
     self.connection = services.RunService.Heartbeat:Connect(function()
         if config.isUnloaded then
@@ -45,15 +53,18 @@ function AllyScan:start(duration, services, walls, config)
             return
         end
 
-        -- Allies are inferred from currently visible targets during the short
-        -- scan window, then renamed so the wall tracker ignores them.
-        for _, model in ipairs(services.Workspace:GetDescendants()) do
-            if model:IsA("Model") and model.Name == config.TARGET_NAME then
+        -- Check only cached models instead of calling GetDescendants every frame
+        for i = #cachedModels, 1, -1 do
+            local model = cachedModels[i]
+            if not model or not model.Parent then
+                table.remove(cachedModels, i)
+            elseif model.Name == config.TARGET_NAME then
                 local head = model:FindFirstChild(config.TARGET_PART)
                 local box = head and head:FindFirstChild(config.REQUIRED_CHILD)
                 if box and box:IsA("BoxHandleAdornment") and box.Color3 == config.visibleColor then
                     walls:untrackHead(head)
                     model.Name = "Team"
+                    table.remove(cachedModels, i)
                 end
             end
         end

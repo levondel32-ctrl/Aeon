@@ -257,6 +257,7 @@ end)
 
 -- Main update loop
 local colorAccumulator = 0
+local COLOR_UPDATE_INTERVAL = 0.2 -- Increased from 0.1 to reduce raycasting frequency
 RunService.RenderStepped:Connect(function(dt)
 	-- Update aimbot keybind state
 	Aimbot:setHoldingKey(aimbotKeyHeld)
@@ -266,7 +267,7 @@ RunService.RenderStepped:Connect(function(dt)
 	
 	-- Update Wall colors (throttled to reduce performance impact)
 	colorAccumulator = colorAccumulator + dt
-	if colorAccumulator >= 0.1 then
+	if colorAccumulator >= COLOR_UPDATE_INTERVAL then
 		colorAccumulator = 0
 		Wall:updateColors(Camera, services.Workspace, services.Players.LocalPlayer, wallConfig)
 	end

@@ -1,6 +1,6 @@
 --[[
     Aimbot Module for BRM5 PVP
-    Uses Wall system for target detection
+    Optimized version using Wall system
 ]]
 
 local Aimbot = {
@@ -9,17 +9,20 @@ local Aimbot = {
     fovStroke = nil,
     holdingKey = false,
     enabled = false,
-    fovEnabled = true,
-    fovRadius = 100,
-    fovColor = Color3.fromRGB(255, 255, 255),
-    smoothing = 95,
-    deadzone = 1.5,
-    wallSystem = nil  -- Reference to Wall module
+    wallSystem = nil,
+    config = {
+        fovEnabled = true,
+        fovRadius = 100,
+        fovColor = Color3.fromRGB(255, 255, 255),
+        smoothing = 95,
+        DEADZONE = 1.5,
+        REQUIRED_CHILD = "Wall_Box",
+        visibleColor = Color3.fromRGB(0, 255, 0),
+        isUnloaded = false
+    }
 }
 
 local Players = game:GetService("Players")
-local Workspace = game:GetService("Workspace")
-local LocalPlayer = Players.LocalPlayer
 
 local function getPlayerGui()
     local localPlayer = Players.LocalPlayer
@@ -67,7 +70,7 @@ local function ensureFOVCircle()
 
     local stroke = Instance.new("UIStroke")
     stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-    stroke.Color = Aimbot.fovColor
+    stroke.Color = Aimbot.config.fovColor
     stroke.Thickness = 2
     stroke.Parent = circle
 
@@ -94,40 +97,41 @@ function Aimbot:updateFOVCircle(camera)
         return
     end
 
-    local radius = math.max(self.fovRadius, 0)
+    local radius = math.max(self.config.fovRadius, 0)
     local diameter = radius * 2
     local screenCenter = getScreenCenter(camera)
     self.fovCircle.Size = UDim2.fromOffset(diameter, diameter)
     self.fovCircle.Position = UDim2.fromOffset(screenCenter.X, screenCenter.Y)
-    self.fovCircle.Visible = self.fovEnabled and radius > 0
+    self.fovCircle.Visible = self.config.fovEnabled and not self.config.isUnloaded and radius > 0
     
     -- Update color
     if self.fovStroke then
-        self.fovStroke.Color = self.fovColor
+        self.fovStroke.Color = self.config.fovColor
     end
 end
 
-function Aimbot:getClosestHead(camera, visibleColor)
-    if not camera or not self.wallSystem then
+function Aimbot:getClosestHead(camera)
+    if not self.wallSystem or not camera then
         return nil
     end
 
     local closestTarget, minDistance = nil, math.huge
     local screenCenter = getScreenCenter(camera)
+    local fovRadiusSq = self.config.fovRadius * self.config.fovRadius -- Use squared distance to avoid sqrt
 
-    -- Use Wall system's tracked heads - only aim at visible targets (green box)
+    -- Use Wall system's tracked heads - only aim at visible targets
     for head in pairs(self.wallSystem.trackedHeads) do
-        if head and head.Parent then
-            local box = head:FindFirstChild("Wall_Box")
-            -- Only target heads with visible (green) box
-            if box and box:IsA("BoxHandleAdornment") and box.Color3 == visibleColor and box.Visible then
-                local targetPosition, onScreen = camera:WorldToViewportPoint(head.Position)
-                if onScreen then
-                    local distanceToCenter = (Vector2.new(targetPosition.X, targetPosition.Y) - screenCenter).Magnitude
-                    if (not self.fovEnabled or distanceToCenter <= self.fovRadius) and distanceToCenter < minDistance then
-                        closestTarget = head
-                        minDistance = distanceToCenter
-                    end
+        local box = head and head:FindFirstChild(self.config.REQUIRED_CHILD)
+        if head and head.Parent and box and box:IsA("BoxHandleAdornment") and box.Color3 == self.config.visibleColor and box.Visible then
+            local targetPosition, onScreen = camera:WorldToViewportPoint(head.Position)
+            if onScreen then
+                local deltaX = targetPosition.X - screenCenter.X
+                local deltaY = targetPosition.Y - screenCenter.Y
+                local distanceSq = deltaX * deltaX + deltaY * deltaY -- Squared distance (faster)
+                
+                if (not self.config.fovEnabled or distanceSq <= fovRadiusSq) and distanceSq < minDistance then
+                    closestTarget = head
+                    minDistance = distanceSq
                 end
             end
         end
@@ -145,11 +149,11 @@ function Aimbot:aimAtTarget(target, camera)
     local screenCenter = getScreenCenter(camera)
     local delta = targetPosition - Vector3.new(screenCenter.X, screenCenter.Y, targetPosition.Z)
 
-    if math.abs(delta.X) < self.deadzone and math.abs(delta.Y) < self.deadzone then
+    if math.abs(delta.X) < self.config.DEADZONE and math.abs(delta.Y) < self.config.DEADZONE then
         return
     end
 
-    local smoothingFactor = math.clamp(1 - (self.smoothing / 100), 0, 1)
+    local smoothingFactor = math.clamp(1 - (self.config.smoothing / 100), 0, 1)
     mousemoverel(
         math.clamp(delta.X * smoothingFactor, -25, 25),
         math.clamp(delta.Y * smoothingFactor, -25, 25)
@@ -179,23 +183,22 @@ function Aimbot.Disable()
     Aimbot:cleanup()
 end
 
--- Check if aimbot should be active (enabled AND key held)
 function Aimbot.IsActive()
     return Aimbot.enabled and Aimbot.holdingKey
 end
 
 function Aimbot.UpdateSettings(settings)
     if settings.FOVRadius ~= nil then
-        Aimbot.fovRadius = math.clamp(settings.FOVRadius, 0, 500)
+        Aimbot.config.fovRadius = math.clamp(settings.FOVRadius, 0, 500)
     end
     if settings.Smoothness ~= nil then
-        Aimbot.smoothing = math.clamp(settings.Smoothness, 0, 100)
+        Aimbot.config.smoothing = math.clamp(settings.Smoothness, 0, 100)
     end
     if settings.DrawFOV ~= nil then
-        Aimbot.fovEnabled = settings.DrawFOV
+        Aimbot.config.fovEnabled = settings.DrawFOV
     end
     if settings.FOVColor ~= nil then
-        Aimbot.fovColor = settings.FOVColor
+        Aimbot.config.fovColor = settings.FOVColor
     end
 end
 
