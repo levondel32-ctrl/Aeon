@@ -1,105 +1,146 @@
 --[[
     Rapid Fire Module for BRM5 PVP
-    Modifies weapon RPM (Rounds Per Minute) for faster shooting
+    Hooks Tool.Activated to bypass fire rate
 ]]
 
 local RapidFire = {
     enabled = false,
     rpm = 1000,
-    hooked = false,
+    lastShot = 0,
+    connections = {},
 }
 
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
 
--- Hook __index metamethod to intercept RPM reads
-local function hookMetatable()
-    local mt = getrawmetatable(game)
-    local oldIndex = mt.__index
-    
-    setreadonly(mt, false)
-    
-    mt.__index = newcclosure(function(t, k)
-        if RapidFire.enabled and k == "RPM" and type(rawget(t, "RPM")) == "number" then
-            return RapidFire.rpm
-        end
-        return oldIndex(t, k)
-    end)
-    
-    setreadonly(mt, true)
-    return true
+-- Calculate delay from RPM
+local function getRPMDelay()
+    return 60 / RapidFire.rpm
 end
 
--- Direct config patching
-local function patchAllConfigs()
-    local weaponPath = ReplicatedStorage:FindFirstChild("Shared")
-    if not weaponPath then return 0 end
+-- Hook a tool's Activated event
+local function hookTool(tool)
+    if not tool:IsA("Tool") then return end
     
-    weaponPath = weaponPath:FindFirstChild("Configs")
-    if not weaponPath then return 0 end
+    -- Disconnect old connection if exists
+    if RapidFire.connections[tool] then
+        RapidFire.connections[tool]:Disconnect()
+    end
     
-    weaponPath = weaponPath:FindFirstChild("Weapon")
-    if not weaponPath then return 0 end
+    -- Store original Activated
+    local originalActivated = tool.Activated
     
-    local count = 0
+    -- Hook Activated
+    RapidFire.connections[tool] = tool.Activated:Connect(function()
+        if not RapidFire.enabled then return end
+        
+        local currentTime = tick()
+        local timeSinceLastShot = currentTime - RapidFire.lastShot
+        local requiredDelay = getRPMDelay()
+        
+        if timeSinceLastShot >= requiredDelay then
+            RapidFire.lastShot = currentTime
+            -- Let the shot go through
+        else
+            -- Too soon, but we'll allow it anyway for rapid fire
+            RapidFire.lastShot = currentTime
+        end
+    end)
+end
+
+-- Monitor character for new tools
+local function monitorCharacter(character)
+    if not character then return end
     
-    for _, folder in pairs(weaponPath:GetDescendants()) do
-        if folder:IsA("ModuleScript") then
-            local success, config = pcall(require, folder)
-            if success and type(config) == "table" then
-                if config.Tune and type(config.Tune.RPM) == "number" then
-                    if RapidFire.enabled then
-                        config.Tune.RPM = RapidFire.rpm
-                    end
-                    count = count + 1
+    -- Hook existing tools
+    for _, tool in pairs(character:GetChildren()) do
+        hookTool(tool)
+    end
+    
+    -- Hook new tools
+    character.ChildAdded:Connect(function(child)
+        if child:IsA("Tool") then
+            hookTool(child)
+        end
+    end)
+end
+
+-- Monitor backpack for tools
+local function monitorBackpack()
+    local backpack = LocalPlayer:FindFirstChild("Backpack")
+    if not backpack then return end
+    
+    for _, tool in pairs(backpack:GetChildren()) do
+        hookTool(tool)
+    end
+    
+    backpack.ChildAdded:Connect(function(child)
+        if child:IsA("Tool") then
+            hookTool(child)
+        end
+    end)
+end
+
+-- Alternative: Hook mouse click and spam fire
+local mouse
+local mouseConnection
+local function setupMouseSpam()
+    if not LocalPlayer:GetMouse() then return end
+    mouse = LocalPlayer:GetMouse()
+    
+    if mouseConnection then
+        mouseConnection:Disconnect()
+    end
+    
+    mouseConnection = mouse.Button1Down:Connect(function()
+        if not RapidFire.enabled then return end
+        
+        task.spawn(function()
+            while RapidFire.enabled and mouse.Button1Down do
+                local tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
+                if tool then
+                    tool:Activate()
                 end
+                task.wait(getRPMDelay())
             end
-        end
-    end
-    
-    return count
-end
-
--- Continuous patching loop
-local patchConnection
-local function startPatchLoop()
-    if patchConnection then return end
-    
-    patchConnection = game:GetService("RunService").Heartbeat:Connect(function()
-        if RapidFire.enabled then
-            patchAllConfigs()
-        end
+        end)
     end)
-end
-
-local function stopPatchLoop()
-    if patchConnection then
-        patchConnection:Disconnect()
-        patchConnection = nil
-    end
 end
 
 -- Public API
 function RapidFire.Enable()
     RapidFire.enabled = true
     
-    -- Try metamethod hook first
-    if not RapidFire.hooked then
-        local success = pcall(hookMetatable)
-        if success then
-            RapidFire.hooked = true
-        end
+    -- Setup character monitoring
+    if LocalPlayer.Character then
+        monitorCharacter(LocalPlayer.Character)
     end
     
-    -- Start continuous patching
-    startPatchLoop()
+    LocalPlayer.CharacterAdded:Connect(function(character)
+        monitorCharacter(character)
+    end)
     
-    -- Initial patch
-    local count = patchAllConfigs()
+    -- Setup backpack monitoring
+    monitorBackpack()
+    
+    -- Setup mouse spam as fallback
+    setupMouseSpam()
 end
 
 function RapidFire.Disable()
     RapidFire.enabled = false
-    stopPatchLoop()
+    
+    -- Disconnect all tool connections
+    for tool, connection in pairs(RapidFire.connections) do
+        connection:Disconnect()
+    end
+    RapidFire.connections = {}
+    
+    -- Disconnect mouse
+    if mouseConnection then
+        mouseConnection:Disconnect()
+        mouseConnection = nil
+    end
 end
 
 function RapidFire.Toggle(state)
