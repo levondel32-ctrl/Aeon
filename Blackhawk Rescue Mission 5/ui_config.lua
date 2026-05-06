@@ -16,6 +16,7 @@ local Freeze = BRM.Freeze
 local NoRecoil = BRM.NoRecoil
 local Fullbright = BRM.Fullbright
 local RapidFire = BRM.RapidFire
+local ThirdPerson = BRM.ThirdPerson
 local Wall = BRM.Wall
 local AllyScan = BRM.AllyScan
 
@@ -62,6 +63,7 @@ local function cleanup()
 	Freeze.Disable()
 	Fullbright.Disable()
 	RapidFire.Disable()
+	ThirdPerson.Disable()
 end
 
 -- Create UI Window
@@ -255,6 +257,28 @@ LightingSection:AddToggle({
 		else
 			Fullbright.Disable()
 		end
+	end
+})
+
+local ThirdPersonSection = VisualsTab:CreateSection({ Name = "Third Person" })
+
+ThirdPersonSection:AddToggle({
+	Name = "Enable Third Person",
+	Flag = "BRM5_ThirdPerson",
+	Value = false,
+	Callback = function(v)
+		ThirdPerson.Toggle(v)
+	end
+})
+
+ThirdPersonSection:AddSlider({
+	Name = "Camera Distance",
+	Flag = "BRM5_ThirdPersonDistance",
+	Value = 15,
+	Min = 5,
+	Max = 50,
+	Callback = function(v)
+		ThirdPerson.UpdateSettings({ Distance = v })
 	end
 })
 

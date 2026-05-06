@@ -12,6 +12,7 @@ local Fullbright = loadstring(game:HttpGet("https://raw.githubusercontent.com/le
 local RapidFire = loadstring(game:HttpGet("https://raw.githubusercontent.com/levondel32-ctrl/Aeon/main/features/brm5/pvp/rapid_fire_brm5.lua"))()
 local Wall = loadstring(game:HttpGet("https://raw.githubusercontent.com/levondel32-ctrl/Aeon/main/features/brm5/pvp/wall.lua"))()
 local AllyScan = loadstring(game:HttpGet("https://raw.githubusercontent.com/levondel32-ctrl/Aeon/main/features/brm5/pvp/ally_scan.lua"))()
+local ThirdPerson = loadstring(game:HttpGet("https://raw.githubusercontent.com/levondel32-ctrl/Aeon/main/features/brm5/pvp/thirdperson_brm5.lua"))()
 
 -- Export to global environment for UI access
 local genv = (type(getgenv) == "function" and getgenv()) or _G
@@ -23,7 +24,8 @@ genv.BRM5_Features = {
     Fullbright = Fullbright,
     RapidFire = RapidFire,
     Wall = Wall,
-    AllyScan = AllyScan
+    AllyScan = AllyScan,
+    ThirdPerson = ThirdPerson
 }
 
 -- Load UI configuration
