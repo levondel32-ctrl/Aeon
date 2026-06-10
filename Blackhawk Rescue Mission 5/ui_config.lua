@@ -19,6 +19,7 @@ local RapidFire = BRM.RapidFire
 local ThirdPerson = BRM.ThirdPerson
 local Wall = BRM.Wall
 local AllyScan = BRM.AllyScan
+local Weather = BRM.Weather
 
 -- Wall system configuration
 local wallConfig = {
@@ -64,6 +65,7 @@ local function cleanup()
 	Fullbright.Disable()
 	RapidFire.Disable()
 	ThirdPerson.Disable()
+	if Weather then Weather.Disable() end
 end
 
 -- Create UI Window
@@ -256,6 +258,17 @@ LightingSection:AddToggle({
 			Fullbright.Enable()
 		else
 			Fullbright.Disable()
+		end
+	end
+})
+
+LightingSection:AddToggle({
+	Name = "No Weather",
+	Flag = "BRM5_NoWeather",
+	Value = false,
+	Callback = function(v)
+		if Weather then
+			Weather.Toggle(v)
 		end
 	end
 })
