@@ -154,7 +154,7 @@ WeaponSection:AddToggle({
 	Value = false,
 	Callback = function(v)
 		local ReplicatedStorage = game:GetService("ReplicatedStorage")
-		NoRecoil.patchWeapons(ReplicatedStorage, { recoil = v, firemodes = false })
+		NoRecoil.patchWeapons(ReplicatedStorage, { recoil = v })
 	end
 })
 
@@ -164,7 +164,7 @@ WeaponSection:AddToggle({
 	Value = false,
 	Callback = function(v)
 		local ReplicatedStorage = game:GetService("ReplicatedStorage")
-		NoRecoil.patchWeapons(ReplicatedStorage, { recoil = false, firemodes = v })
+		NoRecoil.patchWeapons(ReplicatedStorage, { firemodes = v })
 	end
 })
 
