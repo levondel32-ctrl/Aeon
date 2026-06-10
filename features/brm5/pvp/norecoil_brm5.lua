@@ -1,221 +1,135 @@
 --[[
-    No Recoil Module for BRM5 PVP (v3, lirp-style)
+    No Recoil Module for BRM5 PVP (v4, Parvus-style)
 
-    Почему предыдущая версия могла не работать:
-    require() из экзекьютора часто возвращает СВОЮ копию модуля (отдельная VM),
-    и игровые скрипты не видят изменений в Config.Tune.
+    Конфиги (Receiver.Tune / атрибуты) BRM5 не перечитывает в момент выстрела —
+    отдача применяется рантайм-модулем камеры. Поэтому патчим сам рантайм:
 
-    Подход (как в lirp leaked):
-    1) Основной метод — атрибуты: SetAttribute(..., 0) на инстансах конфигов.
-       Атрибуты общие для всех VM, поэтому игра их видит всегда.
-    2) Fallback — старый require-патч Tune (вдруг экзекьютор шарит кэш).
-    3) NoRecoil.Scan() — печатает в консоль всё, что нашёл, для отладки.
+    * Recoil:    хук CharacterCamera.Update -> Self._recoil.Velocity *= 0
+    * Firemodes: хук FirearmInventory._firemode -> добавляем режимы 1,2,3
+
+    Модули игры достаём через getloadedmodules()/getmodules() + require,
+    как это делает Parvus (AlexR32) — проверенный подход именно для BRM5.
+
+    API совместим со старым: NoRecoil.patchWeapons(RS, {recoil=, firemodes=})
 ]]
 
 local NoRecoil = {}
 
 NoRecoil.state = { recoil = false, firemodes = false }
 
--- [Instance] = { [attrName] = originalValue }
-local attrOriginals = {}
--- [ModuleScript] = { [key] = originalValue }
-local tuneOriginals = {}
+local hooksInstalled = false
 
-local watchConn = nil
-local cachedRoots = nil
+-- ===== Получение загруженных модулей игры =====
 
--- ============ Поиск корневых папок с конфигами оружия ============
-
-local function getRoots(replicatedStorage)
-    if cachedRoots then
-        local ok = true
-        for _, r in ipairs(cachedRoots) do
-            if not r.Parent then ok = false break end
-        end
-        if ok and #cachedRoots > 0 then return cachedRoots end
+local function getModuleInstances()
+    local getter = (type(getloadedmodules) == "function" and getloadedmodules)
+        or (type(getmodules) == "function" and getmodules)
+    if not getter then
+        warn("[Aeon NoRecoil] Экзекьютор не поддерживает getloadedmodules/getmodules")
+        return nil
     end
-
-    local roots = {}
-
-    -- Известный путь BRM5
-    local node = replicatedStorage
-    for _, name in ipairs({ "Shared", "Configs", "Weapon" }) do
-        node = node and (node:FindFirstChild(name) or node:WaitForChild(name, 3))
+    local ok, list = pcall(getter)
+    if ok and type(list) == "table" then
+        return list
     end
-    if node then
-        table.insert(roots, node) -- берём Weapon целиком (Weapons_Player + всё рядом)
-    end
+    return nil
+end
 
-    -- Запасной поиск: любые папки с "Weapon"/"Ammo" в имени в ReplicatedStorage
-    if #roots == 0 then
-        for _, child in ipairs(replicatedStorage:GetDescendants()) do
-            if child:IsA("Folder") and (child.Name:find("Weapon") or child.Name:find("Ammo")) then
-                table.insert(roots, child)
-                if #roots >= 3 then break end
+local function requireModuleByName(name)
+    local list = getModuleInstances()
+    if not list then return nil end
+    for _, inst in ipairs(list) do
+        if inst.Name == name then
+            local ok, mod = pcall(require, inst)
+            if ok and type(mod) == "table" then
+                return mod
             end
         end
     end
-
-    if #roots == 0 then
-        warn("[Aeon NoRecoil] Не нашёл папки конфигов оружия в ReplicatedStorage")
-    end
-
-    cachedRoots = roots
-    return roots
+    return nil
 end
 
--- ============ Метод 1: атрибуты (lirp-style, работает между VM) ============
+-- ===== Установка хука на метод модуля (с ожиданием загрузки) =====
 
-local function isRecoilAttr(name)
-    local n = name:lower()
-    return n:find("recoil") ~= nil
-end
+local function hookMethod(moduleName, fnName, wrapper)
+    task.spawn(function()
+        local mod
+        local deadline = tick() + 60
+        repeat
+            mod = requireModuleByName(moduleName)
+            if mod and type(mod[fnName]) == "function" then break end
+            mod = nil
+            task.wait(0.5)
+        until tick() > deadline
 
-local function patchAttributes(inst, enable)
-    local ok, attrs = pcall(inst.GetAttributes, inst)
-    if not ok or type(attrs) ~= "table" then return 0 end
-
-    local count = 0
-    for name, value in pairs(attrs) do
-        if isRecoilAttr(name) and type(value) == "number" then
-            if enable then
-                attrOriginals[inst] = attrOriginals[inst] or {}
-                if attrOriginals[inst][name] == nil then
-                    attrOriginals[inst][name] = value
-                end
-                local isDamp = name:lower():find("damp") ~= nil
-                pcall(inst.SetAttribute, inst, name, isDamp and 1 or 0)
-                count = count + 1
-            end
+        if not mod then
+            warn(("[Aeon NoRecoil] Модуль '%s' с методом '%s' не найден за 60с")
+                :format(moduleName, fnName))
+            return
         end
-    end
 
-    if not enable and attrOriginals[inst] then
-        for name, value in pairs(attrOriginals[inst]) do
-            pcall(inst.SetAttribute, inst, name, value)
-            count = count + 1
+        local old = mod[fnName]
+        mod[fnName] = function(...)
+            return wrapper(old, ...)
         end
-        attrOriginals[inst] = nil
-    end
-
-    return count
+        print(("[Aeon NoRecoil] Хук установлен: %s.%s"):format(moduleName, fnName))
+    end)
 end
 
--- ============ Метод 2: require-патч Tune (fallback) ============
+local function installHooks()
+    if hooksInstalled then return end
+    hooksInstalled = true
 
-local function patchTune(child)
-    if not (child:IsA("ModuleScript") and child.Name:match("^Receiver")) then
-        return false
-    end
+    -- Отдача: камера применяет _recoil.Velocity каждый кадр — глушим его
+    hookMethod("CharacterCamera", "Update", function(old, self, ...)
+        if NoRecoil.state.recoil and self and self._recoil and self._recoil.Velocity then
+            self._recoil.Velocity = self._recoil.Velocity * 0
+        end
+        return old(self, ...)
+    end)
 
-    local success, receiver = pcall(require, child)
-    if not (success and type(receiver) == "table" and receiver.Config and receiver.Config.Tune) then
-        return false
-    end
-
-    local tune = receiver.Config.Tune
-    tuneOriginals[child] = tuneOriginals[child] or {}
-    local orig = tuneOriginals[child]
-
-    if NoRecoil.state.recoil then
-        for key, value in pairs(tune) do
-            if type(key) == "string" and key:lower():find("recoil") then
-                if orig[key] == nil then orig[key] = value end
-                local isDamp = key:lower():find("damp") ~= nil
-                local t = typeof(value)
-                if t == "number" then
-                    tune[key] = isDamp and 1 or 0
-                elseif t == "Vector2" then
-                    tune[key] = isDamp and Vector2.one or Vector2.zero
-                elseif t == "Vector3" then
-                    tune[key] = isDamp and Vector3.one or Vector3.zero
+    -- Все режимы огня: при переключении дописываем 1 (авто), 2, 3
+    hookMethod("FirearmInventory", "_firemode", function(old, self, ...)
+        if NoRecoil.state.firemodes and self and self._config
+            and self._config.Tune and type(self._config.Tune.Firemodes) == "table" then
+            local modes = self._config.Tune.Firemodes
+            for _, m in ipairs({ 1, 2, 3 }) do
+                if not table.find(modes, m) then
+                    table.insert(modes, m)
                 end
             end
         end
-    else
-        for key, value in pairs(orig) do
-            if key ~= "Firemodes" then tune[key] = value end
-        end
-    end
-
-    if NoRecoil.state.firemodes then
-        if orig.Firemodes == nil then orig.Firemodes = tune.Firemodes end
-        tune.Firemodes = { 3, 2, 1, 0 }
-    elseif orig.Firemodes ~= nil then
-        tune.Firemodes = orig.Firemodes
-    end
-
-    return true
+        return old(self, ...)
+    end)
 end
 
--- ============ Применение ко всему дереву ============
+-- ===== Публичный API (обратно совместим) =====
 
-local function applyEverywhere(replicatedStorage)
-    local roots = getRoots(replicatedStorage)
-    local attrCount, tuneCount = 0, 0
-
-    for _, root in ipairs(roots) do
-        attrCount = attrCount + patchAttributes(root, NoRecoil.state.recoil)
-        for _, child in ipairs(root:GetDescendants()) do
-            attrCount = attrCount + patchAttributes(child, NoRecoil.state.recoil)
-            if patchTune(child) then tuneCount = tuneCount + 1 end
-        end
-    end
-
-    if NoRecoil.state.recoil and attrCount == 0 and tuneCount == 0 then
-        warn("[Aeon NoRecoil] Ничего не запатчено. Запусти NoRecoil.Scan() для диагностики")
-    else
-        print(("[Aeon NoRecoil] attrs: %d, tune-modules: %d"):format(attrCount, tuneCount))
-    end
-end
-
-local function updateWatcher(replicatedStorage)
-    local need = NoRecoil.state.recoil or NoRecoil.state.firemodes
-    if need and not watchConn then
-        local roots = getRoots(replicatedStorage)
-        if roots[1] then
-            watchConn = roots[1].DescendantAdded:Connect(function(child)
-                task.defer(function()
-                    patchAttributes(child, NoRecoil.state.recoil)
-                    patchTune(child)
-                end)
-            end)
-        end
-    elseif not need and watchConn then
-        watchConn:Disconnect()
-        watchConn = nil
-    end
-end
-
--- ============ Публичный API ============
-
-function NoRecoil.patchWeapons(replicatedStorage, patchOptions)
+function NoRecoil.patchWeapons(_replicatedStorage, patchOptions)
     patchOptions = patchOptions or {}
     if patchOptions.recoil ~= nil then NoRecoil.state.recoil = patchOptions.recoil end
     if patchOptions.firemodes ~= nil then NoRecoil.state.firemodes = patchOptions.firemodes end
 
-    applyEverywhere(replicatedStorage)
-    updateWatcher(replicatedStorage)
+    -- Хуки ставим один раз; дальше тогглы просто меняют state,
+    -- выключение мгновенно возвращает оригинальное поведение.
+    installHooks()
     return true
 end
 
--- Диагностика: печатает все recoil-атрибуты и Receiver-модули, которые видит
-function NoRecoil.Scan(replicatedStorage)
-    replicatedStorage = replicatedStorage or game:GetService("ReplicatedStorage")
-    print("[Aeon NoRecoil] === SCAN START ===")
+-- ===== Диагностика =====
+
+function NoRecoil.Scan()
+    local list = getModuleInstances()
+    if not list then
+        print("[Aeon NoRecoil] getloadedmodules недоступен")
+        return
+    end
+    print("[Aeon NoRecoil] === SCAN: ищем модули камеры/оружия ===")
     local found = 0
-    for _, inst in ipairs(replicatedStorage:GetDescendants()) do
-        local ok, attrs = pcall(inst.GetAttributes, inst)
-        if ok and type(attrs) == "table" then
-            for name, value in pairs(attrs) do
-                if isRecoilAttr(name) then
-                    print(("  [attr] %s -> %s = %s"):format(inst:GetFullName(), name, tostring(value)))
-                    found = found + 1
-                end
-            end
-        end
-        if inst:IsA("ModuleScript") and inst.Name:lower():find("receiver") then
-            print(("  [module] %s"):format(inst:GetFullName()))
+    for _, inst in ipairs(list) do
+        local n = inst.Name:lower()
+        if n:find("camera") or n:find("firearm") or n:find("recoil") or n:find("weapon") then
+            print("  [module] " .. inst:GetFullName())
             found = found + 1
         end
     end
